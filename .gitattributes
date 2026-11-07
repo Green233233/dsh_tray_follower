@@ -1,0 +1,10 @@
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+*.tgz binary
+*.ico binary
+*.png binary
+*.webp binary
+*.asar binary

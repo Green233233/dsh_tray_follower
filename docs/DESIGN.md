@@ -14,26 +14,35 @@
 - DSH Desktop 是 Electron 应用，安装目录 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；托盘菜单由主进程 bundle `resources/app.asar` 内的 `lib/main.js` 创建：`lib/types/tray.js` 的 `DesktopTray.relabel()` 用硬编码模板（打开 / 分隔线 / 退出）调用 `Menu.buildFromTemplate` + `tray.setContextMenu`。
 - 该 Electron 应用 **没有** 开放的托盘扩展 API；Electron 的 `EnableEmbeddedAsarIntegrityValidation` fuse 为 disabled，但直接改 asar 会在自动更新后丢失，故不采用。
 - Host（插件进程）是 Electron 主进程 fork 出来的子进程（`@deepseek-ai/dsh-desktop-host`），通过 `process.send` 与主进程通信，只处理固定消息类型，不能反向控制托盘。
-- 主进程 fuse `EnableNodeOptionsEnvironmentVariable` 为 enabled：`NODE_OPTIONS=--require <hook.cjs>` 会被 Electron 主进程遵循，这给了**不修改安装文件**的注入点。
+- `NODE_OPTIONS=--require` 方案**不可行**：Electron 打包应用只支持极少数 NODE_OPTIONS，实测启动报 `Most NODE_OPTIONs are not supported in packaged apps`，钩子不执行（fuse 只表示“允许读取”，不代表支持 `--require`）。
+- 可行注入点（已实测）：打包 DSH 会遵循 CLI 参数 `--inspect=127.0.0.1:<port>`（fuse `EnableNodeCliInspectArguments` enabled）。注入器通过 Node Inspector 协议（WebSocket + CDP）在 Electron 主进程内执行代码，可达 `electron.Tray/Menu/Notification/BrowserWindow`（`process.mainModule.require('electron')` 在 evaluate 上下文中可用），并能用 `Runtime.queryObjects(Tray.prototype)` 找到已创建的托盘实例、用 `Runtime.callFunctionOn` 接管其菜单。原生 `new Notification(...).show()` 已验证可弹 Windows 通知。
 
 ## 3. 架构
 
 ```
-┌──────────────────────── DSH Electron 主进程 ────────────────────────┐
-│  shell-hook.cjs（NODE_OPTIONS --require 注入，两阶段加载）            │
-│   ├─ 捕获 Tray.prototype.setContextMenu → 记住托盘菜单原始项          │
-│   ├─ 轮询状态文件（1s）→ 重建菜单：原始项 + 工作区/会话状态            │
-│   ├─ 轮询事件队列 → 窗口隐藏/失焦时 new Notification() 原生通知        │
-│   └─ 点击通知/菜单项 → 显示并聚焦主窗口（BrowserWindow）              │
+┌──────────────────── 启动器（快捷方式指向）─────────────────────────┐
+│  launch-bridge.vbs/.cmd：选端口 → 起注入器 → 以 --inspect=127.0.0.1:  │
+│  <port> 启动 DeepSeek Harness.exe                                    │
+└──────────────┬───────────────────────────────────────────────────────┘
+               │ Node Inspector WebSocket (CDP)
+┌──────────────▼──────────────── DSH Electron 主进程 ─────────────────┐
+│  injector.mjs：Runtime.enable → 评估 bootstrap 加载 hook.cjs →        │
+│               Runtime.queryObjects 找 Tray → callFunctionOn adopt     │
+│  hook.cjs（注入后常驻主进程）                                         │
+│   ├─ patch Tray.prototype.setContextMenu → 捕获托盘与原始菜单          │
+│   ├─ 轮询状态文件（1s）→ tray.setContextMenu(原菜单 + 工作区/会话状态) │
+│   ├─ 轮询 unreadEvents → 隐藏/失焦时 new Notification() 原生通知       │
+│   └─ 点击通知/菜单项 → restore/show/focus 主窗口                      │
 └───────────────▲──────────────────────────────────┬──────────────────┘
-                │ status.json / events.jsonl       │ 点击
+                │ state.json / bridge.json          │ 点击
 ┌───────────────┴──────────────────────────────────▼──────────────────┐
 │  DSH Host 进程：packages/dsh-tray-follower（DSH 插件）               │
 │   ├─ 订阅 agent/status、session/event、approval/request、            │
 │   │  user-questions/request 等事件，维护会话状态机                    │
 │   ├─ 读取 workspaceRegistry + sessions，按工作区分组                  │
-│   ├─ 原子写状态文件（JSON）与事件队列（JSONL/环形）                    │
-│   └─ 备用通道：无桥接时用 PowerShell WinRT toast 发通知               │
+│   ├─ 原子写状态文件（JSON）与事件队列                                │
+│   ├─ 写 bridge 心跳检测；无桥接时用 PowerShell WinRT toast 发通知     │
+│   └─ 无桥接时：托盘扩展不可用，仅通知（降级路径）                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -84,8 +93,10 @@
 
 - **为什么不改 asar**：自动更新会覆盖，且用户升级路径不可控。
 - **为什么不注入渲染进程**：渲染进程拿不到 Electron `Tray` / `Notification` 主进程 API；浏览器 `Notification` 只能由页面弹，无法在窗口隐藏时保证展示且品牌是浏览器。
-- **为什么桥接用 `NODE_OPTIONS`**：DSH Desktop 主进程 fuse 允许，且不改安装文件；钩子先判断 `process.versions.electron` 与 app 名称，非 DSH 进程立即返回。
-- **失败回退**：桥接未安装时，插件 Host 半仍可用 PowerShell WinRT toast 发系统通知（品牌为 Windows PowerShell，可接受为降级）。
+- **为什么用 Node Inspector 注入**：不改安装文件、不需要管理员权限、官方支持的调试通道；`--inspect` 由启动器附加在命令行上，用户仍按原方式点击快捷方式启动。
+- **为什么不用 `--inspect-brk`**：等待调试器时 `Runtime.evaluate` 会挂起；`--inspect` 本身即可满足“先注入、后建托盘”，且即使注入晚于托盘创建也能用 `Runtime.queryObjects` 接管。
+- **失败回退**：桥接未安装/注入失败时，插件 Host 半仍可用 PowerShell WinRT toast 发系统通知（品牌为 Windows PowerShell）；托盘扩展不可用，但菜单保持 DSH 原样。
+- **安全边界**：Inspector 端口只绑 `127.0.0.1`；注入完成后注入器断开，可选由 hook 调 `node:inspector.close()` 关闭端口；不修改系统环境变量。
 
 ## 6. 未决问题
 
