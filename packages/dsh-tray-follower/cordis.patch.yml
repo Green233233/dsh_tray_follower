@@ -1,0 +1,9 @@
+# dsh-tray-follower bundle patch.
+#
+# Mounts the Host half: it tracks DSH conversations per workspace and writes
+# the state contract (docs/DESIGN.md §4) read by the DSH Desktop tray bridge.
+# The plugin declares `inject = ['agents']` and only adds optional listeners,
+# so it never disables an existing Host row.
+- insert:
+    - id: dsh-tray-follower
+      name: 'dsh-tray-follower'

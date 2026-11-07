@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tray follower",
+    "description": "Tracks each workspace's conversations and publishes their status for the DSH tray icon; raises fallback system notifications when the desktop bridge is unavailable."
+  }
+}

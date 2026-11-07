@@ -20,7 +20,6 @@ import {
   clip,
   isTopLevelSession,
   outcomeOfTurnEnd,
-  waitText,
 } from './classify.js'
 import { stableEventId } from './ids.js'
 import { createStrings } from './strings.js'
@@ -78,6 +77,8 @@ export class SessionTracker {
     this.seenUnread = new Set()
     /** @type {Array<{ sessionId: string, key: string }>} */
     this.publicationQueue = []
+    /** Monotonic per-process occurrence counter for wait notifications. */
+    this.waitSequence = 0
     this.changeListeners = new Set()
     this.unreadListeners = new Set()
   }
@@ -237,7 +238,9 @@ export class SessionTracker {
   }
 
   /**
-   * `agent/error`: a step or turn errored outside a completed turn/end.
+   * `agent/error`: a step or turn errored. The failure is recorded (and shown
+   * once the agent stops running), but the notification is left to the
+   * enclosing `turn/end` failure so a retried step cannot raise a false alarm.
    * @param {{ id?: string | number, session?: any, turn?: number, step?: number, error?: any }} payload
    * @returns {boolean}
    */
@@ -248,11 +251,6 @@ export class SessionTracker {
     entry.lastOutcome = 'failed'
     entry.lastError = errorText(payload?.error) || this.strings.text('errorFallback')
     entry.updatedAt = now
-    const turn = Number.isInteger(payload?.turn) ? payload.turn : 'unknown'
-    this._addUnread(entry, 'failed', {
-      id: stableEventId('failed', entry.id, turn),
-      title: this.strings.text('failedTitle'),
-    })
     this._changed()
     return true
   }
@@ -333,18 +331,24 @@ export class SessionTracker {
           if (!goalHolds) {
             entry.lastOutcome = 'completed'
             entry.lastError = undefined
-            this._addUnread(entry, 'completed', {
-              id: stableEventId('completed', entry.id, Number.isInteger(data.turn) ? data.turn : 'turn'),
-              title: this.strings.text('completedTitle'),
-            })
+            // If the goal already notified its completion (the goal driver may
+            // commit before the closing turn/end), do not notify a second time.
+            if (entry.goal?.phase !== 'complete') {
+              this._addUnread(entry, 'completed', {
+                id: stableEventId('completed', entry.id, Number.isInteger(data.turn) ? data.turn : 'turn'),
+                title: this.strings.text('completedTitle'),
+              })
+            }
           }
         } else if (outcome === 'failed') {
           entry.lastOutcome = 'failed'
           entry.lastError = error || this.strings.text('failedTitle')
-          this._addUnread(entry, 'failed', {
-            id: stableEventId('failed', entry.id, Number.isInteger(data.turn) ? data.turn : 'turn'),
-            title: this.strings.text('failedTitle'),
-          })
+          if (entry.goal?.phase !== 'blocked') {
+            this._addUnread(entry, 'failed', {
+              id: stableEventId('failed', entry.id, Number.isInteger(data.turn) ? data.turn : 'turn'),
+              title: this.strings.text('failedTitle'),
+            })
+          }
         } else {
           entry.lastOutcome = null
           entry.lastError = undefined
@@ -387,6 +391,7 @@ export class SessionTracker {
     const goal = entry.goal
     switch (change.operation) {
       case 'complete': {
+        entry.running = false
         entry.lastOutcome = 'completed'
         entry.lastError = undefined
         this._addUnread(entry, 'completed', {
@@ -396,6 +401,7 @@ export class SessionTracker {
         break
       }
       case 'block': {
+        entry.running = false
         entry.lastOutcome = 'failed'
         entry.lastError = typeof goal?.blockedReason === 'string' && goal.blockedReason !== ''
           ? goal.blockedReason
@@ -419,6 +425,36 @@ export class SessionTracker {
         break
     }
     entry.updatedAt = now
+    this._changed()
+    return true
+  }
+
+  /**
+   * `goal/activation-changed` payload: `{ sessionId, goal?: { id, revision,
+   * activation } }`. Goal activation is process-local (armed means the driver
+   * will continue the goal), so it only adjusts whether the tray keeps showing
+   * the conversation as running between goal rounds.
+   * @param {{ sessionId?: any, goal?: { id?: any, revision?: number, activation?: string } }} payload
+   * @returns {boolean}
+   */
+  goalActivationChanged(payload) {
+    const sessionId = payload?.sessionId
+    if (sessionId === undefined || sessionId === null) return false
+    const entry = this.entries.get(String(sessionId))
+    if (entry === undefined) return false
+    if (payload.goal === undefined) {
+      entry.goal = undefined
+    } else if (entry.goal !== undefined && String(payload.goal.id ?? '') === entry.goal.id) {
+      entry.goal.activation = typeof payload.goal.activation === 'string' ? payload.goal.activation : entry.goal.activation
+    } else {
+      entry.goal = {
+        id: payload.goal.id === undefined ? '' : String(payload.goal.id),
+        revision: Number.isFinite(payload.goal.revision) ? payload.goal.revision : 0,
+        phase: 'active',
+        activation: typeof payload.goal.activation === 'string' ? payload.goal.activation : 'armed',
+      }
+    }
+    entry.updatedAt = this.now()
     this._changed()
     return true
   }
@@ -511,6 +547,7 @@ export class SessionTracker {
       toolName: wait.toolName,
       callId: wait.callId,
       approvalId: wait.approvalId,
+      occurrence: (this.waitSequence += 1),
       at: now,
     })
     entry.lastOutcome = null
@@ -564,7 +601,9 @@ export class SessionTracker {
     if (entry === undefined) return false
     const wait = entry.waits.get(key)
     if (wait === undefined) return false
-    const id = stableEventId('attention', entry.id, wait.kind, key)
+    // One stable id per wait occurrence: re-publishing the same wait is
+    // deduplicated, while a later approval for the same tool notifies again.
+    const id = stableEventId('attention', entry.id, wait.kind, wait.occurrence)
     const added = this._addUnread(entry, 'needs-attention', {
       id,
       title: this.strings.text('attentionTitle'),

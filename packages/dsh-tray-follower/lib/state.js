@@ -74,15 +74,16 @@ export function groupSessions(sessions, workspaces, strings = createStrings('en'
   }
 
   for (const section of sections) section.sessions.sort(compareSessions)
+  const populated = sections.filter((section) => section.sessions.length > 0)
   if (orphaned.length > 0) {
-    sections.push({
+    populated.push({
       id: UNASSIGNED_WORKSPACE_ID,
       title: strings.text('otherConversations'),
       path: '',
       sessions: orphaned.sort(compareSessions),
     })
   }
-  return sections
+  return populated
 }
 
 /**

@@ -25,6 +25,6 @@
 
 ## 验证基线
 
-- 插件 Host 半：`node --check` 全部 JS；`node --test` 通过；`cordis_inspect_query` 能看到新增行。
+- 插件 Host 半：`node --check` 全部 JS；`node --test "packages/dsh-tray-follower/test/*.test.mjs"` 通过（Node 24 不把目录参数当测试发现）；`cordis_inspect_query` 能看到新增行。
 - 桥接：`node tools/bridge-selftest.mjs` 通过（不启动 GUI 也能验证状态解析、菜单模型、通知去重逻辑）。
 - 端到端：需要用户重启 DSH 后观察托盘菜单与通知；未实测前不得声称“已验证”。

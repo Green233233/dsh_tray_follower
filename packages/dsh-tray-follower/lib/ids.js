@@ -14,7 +14,8 @@ import { createHash } from 'node:crypto'
  */
 export function stableEventId(...parts) {
   const canonical = parts
-    .map((part) => (part === undefined || part === null ? '' : String(part)))
+    .filter((part) => part !== undefined && part !== null && part !== '')
+    .map((part) => String(part))
     .join('\u0000')
   return `evt_${createHash('sha1').update(canonical, 'utf8').digest('hex').slice(0, 20)}`
 }

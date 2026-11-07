@@ -7,7 +7,7 @@
  * Overridden by DSH_TRAY_FOLLOWER_DIR.
  */
 import { homedir as osHomedir } from 'node:os'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 
 /** Environment variable documented in docs/DESIGN.md §4. */
 export const DATA_DIR_ENV = 'DSH_TRAY_FOLLOWER_DIR'
@@ -31,6 +31,9 @@ export function resolveDataDir(options = {}) {
   const env = options.env ?? process.env
   const platform = options.platform ?? process.platform
   const homedir = typeof options.homedir === 'function' ? options.homedir : osHomedir
+  // Use the separator of the *target* platform so the contract path is right
+  // when this module is exercised in unit tests on another OS.
+  const join = platform === 'win32' ? win32.join : posix.join
 
   const override = typeof env[DATA_DIR_ENV] === 'string' ? env[DATA_DIR_ENV].trim() : ''
   if (override !== '') return override
@@ -54,7 +57,7 @@ export function resolveDataDir(options = {}) {
  * @returns {string}
  */
 export function stateFilePath(dataDir) {
-  return join(dataDir, STATE_FILE_NAME)
+  return joinFor(dataDir, STATE_FILE_NAME)
 }
 
 /**
@@ -62,5 +65,17 @@ export function stateFilePath(dataDir) {
  * @returns {string}
  */
 export function bridgeHeartbeatPath(dataDir) {
-  return join(dataDir, BRIDGE_FILE_NAME)
+  return joinFor(dataDir, BRIDGE_FILE_NAME)
+}
+
+/**
+ * Join with a separator that matches the directory string itself.
+ * @param {string} directory
+ * @param {string} name
+ * @returns {string}
+ */
+function joinFor(directory, name) {
+  const separator = directory.includes('\\') ? win32.sep : posix.sep
+  const base = directory.endsWith(separator) ? directory.slice(0, -1) : directory
+  return `${base}${separator}${name}`
 }

@@ -68,10 +68,10 @@ for (const manifest of ['packages/dsh-tray-follower/package.json', 'bridge/shell
   }
 }
 
-// 3. plugin unit tests (node --test)
+// 3. plugin unit tests (node --test; positional glob, directories are not discovered by Node 24)
 const pluginTests = path.join(root, 'packages/dsh-tray-follower')
 if (fs.existsSync(path.join(pluginTests, 'test'))) {
-  run('node --test packages/dsh-tray-follower', process.execPath, ['--test', 'packages/dsh-tray-follower'])
+  run('node --test packages/dsh-tray-follower/test/*.test.mjs', process.execPath, ['--test', 'packages/dsh-tray-follower/test/*.test.mjs'])
 }
 
 // 4. bridge self-test
