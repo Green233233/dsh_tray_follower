@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **About page in DSH Settings** (`设置 → 关于` / *Settings → About*, section id
-  `tray-follower-about`): author information, repository link, license and the
-  acknowledgement line for @DuoZhao2026.
+- **About tab inside the Tray follower settings page** (`设置 → 托盘随航 → 关于`):
+  author information, repository link, license and the acknowledgement line for
+  @DuoZhao2026.
 - **Tray row deep link**: clicking a conversation row now opens that conversation
   inside DSH instead of only focusing the window (bridge dispatches
   `dsh-tray-follower:open-session`; the Client half calls

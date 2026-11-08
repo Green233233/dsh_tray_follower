@@ -333,7 +333,7 @@ function createContext(locale, slots, form) {
   }
 }
 
-/** Boot the module exactly as the browser loader would, then pick one page. */
+/** Boot the module exactly as the browser loader would. */
 function setup(overrides = {}) {
   const runtime = createRuntime()
   const switchCalls = []
@@ -351,19 +351,16 @@ function setup(overrides = {}) {
   const ctx = createContext(locale, slots, formHandle.form)
   module.apply(ctx)
   const injected = slots.injected.filter((candidate) => candidate.name === SLOT)
-  assert.equal(injected.length, 2, 'two settings.section registrations')
-  for (const candidate of injected) candidate.callback()
-  assert.equal(slots.registrations.length, 2, 'two settings pages registered')
-  const entries = new Map(slots.registrations.map((entry) => [entry.options.id, entry]))
+  assert.equal(injected.length, 1, 'one settings.section registration')
+  injected[0].callback()
+  assert.equal(slots.registrations.length, 1, 'one settings page registered')
+  const entry = slots.registrations[0]
   if (overrides.language !== undefined) locale.use(overrides.language)
-  const pageId = overrides.page ?? SETTINGS_SECTION_ID
-  const entry = entries.get(pageId)
-  assert.ok(entry, `page ${pageId} is registered`)
   const t = locale.bind(NS)
   const injectedProps = typeof entry.options.inject === 'function' ? entry.options.inject() : {}
   const props = Object.assign({ t }, injectedProps)
   const render = () => runtime.renderPage(entry.component, () => props)
-  return { definition, module, window, locale, slots, ctx, formHandle, entries, entry, t, render, switchCalls }
+  return { definition, module, window, locale, slots, ctx, formHandle, entry, t, render, switchCalls }
 }
 
 /** Visit every element object in a rendered tree. */
@@ -431,6 +428,21 @@ function findNotice(tree) {
   return findAll(tree, (element) => element.props?.role === 'status')[0]
 }
 
+/** All in-page tab buttons, in render order. */
+function tabButtons(tree) {
+  return findAll(tree, (element) => element.props?.role === 'tab')
+}
+
+/** The in-page tab button carrying one label. */
+function tabByLabel(tree, label) {
+  return tabButtons(tree).find((button) => textOf(button) === label)
+}
+
+/** The active in-page tab panel. */
+function tabPanel(tree) {
+  return findAll(tree, (element) => element.props?.role === 'tabpanel')[0]
+}
+
 test('client module uses the package id and requires the workspace service', () => {
   const runtime = createRuntime()
   const { definition, module } = loadModule(runtime.react, {})
@@ -439,8 +451,8 @@ test('client module uses the package id and requires the workspace service', () 
   assert.deepEqual(Array.from(module.inject), ['uiWorkspace', 'slots', 'locale', 'configForms'])
 })
 
-test('apply registers dictionaries and both settings sections', () => {
-  const { locale, slots, ctx, entries, formHandle } = setup()
+test('apply registers dictionaries and the single settings section', () => {
+  const { locale, slots, ctx, entry, formHandle } = setup()
 
   // Dictionaries: one namespace, both baseline locales, same keys.
   assert.equal(locale.registered.length, 1)
@@ -453,6 +465,8 @@ test('apply registers dictionaries and both settings sections', () => {
   assert.equal(dictionaries.locales.zh.title, '托盘随航')
   assert.equal(dictionaries.locales.en.nav, 'Tray follower')
   assert.equal(dictionaries.locales.en.title, 'Tray follower')
+  assert.equal(dictionaries.locales.zh.settingsTab, '设置')
+  assert.equal(dictionaries.locales.en.settingsTab, 'Settings')
   assert.equal(dictionaries.locales.zh.aboutNav, '关于')
   assert.equal(dictionaries.locales.en.aboutNav, 'About')
 
@@ -463,31 +477,29 @@ test('apply registers dictionaries and both settings sections', () => {
   // The shared Config form is resolved once by the Host entry id.
   assert.deepEqual(ctx.configFormsGets, [ENTRY_ID])
 
-  // Two `settings.section` registrations: preferences (30) and About (31).
+  // Exactly one `settings.section` registration remains: the About content is
+  // an in-page tab, not a second Settings section.
   assert.deepEqual(
     slots.injected.map((candidate) => candidate.name),
-    [SLOT, SLOT],
+    [SLOT],
   )
-  const settings = entries.get(SETTINGS_SECTION_ID)
-  const about = entries.get(ABOUT_SECTION_ID)
-  assert.ok(settings, 'preferences page registered')
-  assert.ok(about, 'About page registered')
-  assert.equal(settings.options.name, SLOT)
-  assert.equal(settings.options.order, 30)
-  assert.equal(settings.options.locale, NS)
-  assert.equal(settings.options.label(), '托盘随航')
-  assert.equal(about.options.name, SLOT)
-  assert.equal(about.options.order, 31)
-  assert.equal(about.options.locale, NS)
-  assert.equal(about.options.label(), '关于')
+  assert.equal(slots.registrations.length, 1)
+  assert.equal(entry.options.name, SLOT)
+  assert.equal(entry.options.id, SETTINGS_SECTION_ID)
+  assert.equal(entry.options.order, 30)
+  assert.equal(entry.options.locale, NS)
+  assert.equal(entry.options.label(), '托盘随航')
+  assert.equal(
+    slots.registrations.some((candidate) => candidate.options.id === ABOUT_SECTION_ID),
+    false,
+    'no separate About section is registered',
+  )
   locale.use('en')
-  assert.equal(settings.options.label(), 'Tray follower', 'settings label follows the active language')
-  assert.equal(about.options.label(), 'About', 'About label follows the active language')
+  assert.equal(entry.options.label(), 'Tray follower', 'settings label follows the active language')
   locale.use('zh')
 
-  assert.equal(settings.options.inject().form, formHandle.form)
-  assert.equal(typeof settings.component, 'function')
-  assert.equal(typeof about.component, 'function')
+  assert.equal(entry.options.inject().form, formHandle.form)
+  assert.equal(typeof entry.component, 'function')
 })
 
 test('page renders through the native Switch, both card groups and every field', () => {
@@ -651,17 +663,43 @@ test('the compact fallback switch is used only when ui.Switch is missing', () =>
   assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], true, 'fallback also flips optimistically')
 })
 
-test('the About page renders author, repository, license, and the acknowledgement text', () => {
-  const { entries, render } = setup({ page: ABOUT_SECTION_ID })
-  assert.equal(entries.get(ABOUT_SECTION_ID).options.order, 31)
-  const page = render()
+test('the About content is an in-page tab of the settings page, not a section', () => {
+  const { render } = setup()
+  let page = render()
 
-  const text = textOf(page)
-  assert.ok(text.includes('托盘随航'), 'plugin title')
-  assert.ok(text.includes('Green233233'), 'author name')
-  assert.ok(text.includes(REPOSITORY_URL), 'repository url')
-  assert.ok(text.includes('MIT'), 'license')
-  assert.ok(text.includes(ACKNOWLEDGEMENT_ZH), 'exact Chinese acknowledgement line')
+  // Tab row: exactly two tabs, 设置 active by default, 关于 second.
+  const tabs = tabButtons(page)
+  assert.equal(tabs.length, 2)
+  assert.deepEqual(tabs.map((tab) => textOf(tab)), ['设置', '关于'])
+  assert.equal(tabs[0].props.role, 'tab')
+  assert.equal(tabs[0].props['aria-selected'], true)
+  assert.equal(tabs[1].props['aria-selected'], false)
+  assert.equal(tabs[0].props.tabIndex, 0)
+  assert.equal(tabs[1].props.tabIndex, -1)
+  assert.equal(tabs[0].props['aria-controls'], 'tray-follower-panel-settings')
+
+  // The default panel keeps the settings groups and shows no About content.
+  const settingsPanel = tabPanel(page)
+  assert.ok(settingsPanel, 'settings panel rendered')
+  assert.equal(settingsPanel.props.id, 'tray-follower-panel-settings')
+  assert.ok(textOf(page).includes('托盘右键菜单'))
+  assert.ok(!textOf(page).includes('Green233233'))
+
+  // Switching to 关于 renders the About content inside the same page.
+  tabByLabel(page, '关于').props.onClick()
+  page = render()
+  const aboutPanel = tabPanel(page)
+  assert.equal(aboutPanel.props.id, 'tray-follower-panel-about')
+  assert.equal(aboutPanel.props['aria-labelledby'], 'tray-follower-tab-about')
+  const aboutText = textOf(page)
+  assert.ok(aboutText.includes('托盘随航'), 'plugin title stays visible')
+  assert.ok(aboutText.includes('Green233233'), 'author name')
+  assert.ok(aboutText.includes(REPOSITORY_URL), 'repository url')
+  assert.ok(aboutText.includes('MIT'), 'license')
+  assert.ok(aboutText.includes(ACKNOWLEDGEMENT_ZH), 'exact Chinese acknowledgement line')
+  assert.ok(!aboutText.includes('托盘右键菜单'), 'settings groups are hidden on the About tab')
+  assert.equal(tabByLabel(page, '关于').props['aria-selected'], true)
+  assert.equal(tabByLabel(page, '设置').props['aria-selected'], false)
 
   const links = findAll(page, (element) => element.type === 'a')
   const byHref = new Map(links.map((link) => [link.props.href, link]))
@@ -676,8 +714,54 @@ test('the About page renders author, repository, license, and the acknowledgemen
   assert.equal(textOf(byHref.get(AUTHOR_URL)), 'Green233233')
   assert.equal(textOf(byHref.get(ACKNOWLEDGEMENT_URL)), '@DuoZhao2026', 'link text includes the @')
 
-  const english = setup({ page: ABOUT_SECTION_ID, language: 'en' }).render()
+  // Switching back restores the settings groups.
+  tabByLabel(page, '设置').props.onClick()
+  page = render()
+  assert.ok(textOf(page).includes('托盘右键菜单'))
+  assert.ok(!textOf(page).includes('Green233233'))
+  assert.equal(tabPanel(page).props.id, 'tray-follower-panel-settings')
+
+  // The same tabs render in English, including the acknowledgement line.
+  const englishHarness = setup({ language: 'en' })
+  let english = englishHarness.render()
+  assert.deepEqual(tabButtons(english).map((tab) => textOf(tab)), ['Settings', 'About'])
+  tabByLabel(english, 'About').props.onClick()
+  english = englishHarness.render()
   assert.ok(textOf(english).includes(ACKNOWLEDGEMENT_EN), 'exact English acknowledgement line')
+})
+
+test('the in-page tabs respond to keyboard navigation', () => {
+  const { render } = setup()
+  let page = render()
+  let prevented = false
+
+  const press = (label, key) => {
+    tabByLabel(page, label).props.onKeyDown({
+      key,
+      preventDefault() {
+        prevented = true
+      },
+      currentTarget: { parentElement: null },
+    })
+    page = render()
+  }
+
+  press('设置', 'ArrowRight')
+  assert.equal(prevented, true, 'arrow key handling prevents the default')
+  assert.equal(tabByLabel(page, '关于').props['aria-selected'], true)
+
+  press('关于', 'ArrowLeft')
+  assert.equal(tabByLabel(page, '设置').props['aria-selected'], true)
+
+  press('设置', 'End')
+  assert.equal(tabByLabel(page, '关于').props['aria-selected'], true)
+
+  press('关于', 'Home')
+  assert.equal(tabByLabel(page, '设置').props['aria-selected'], true)
+
+  // Unhandled keys leave the active tab alone.
+  press('设置', 'Tab')
+  assert.equal(tabByLabel(page, '设置').props['aria-selected'], true)
 })
 
 test('window session event opens the session through uiWorkspace', () => {

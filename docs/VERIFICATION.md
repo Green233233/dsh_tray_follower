@@ -156,7 +156,7 @@ node tools/install-bridge.mjs --apply
 | 检查项 | 结果 |
 |---|---|
 | 插件热重载 | PASS；`plugin_manager set_bundle` 关闭/开启后 `state.json` 继续以 `schemaVersion: 2` + `options` 刷新 |
-| 设置页注册 | PASS；`cordis_inspect_query client Slots root=settings.section` occupants：`tray-follower`(order 30) 与 `tray-follower-about`(order 31) 均 active |
+| 设置页注册 | PASS；`cordis_inspect_query client Slots root=settings.section` occupants 只有 `tray-follower`(order 30) active；「关于」是页内 tab（设置 / 关于），不再单独占用设置导航项 |
 | 中文名 | PASS；`locale/zh.json` meta.title = 托盘随航，客户端 nav/title = 托盘随航（测试断言） |
 | 桥接载荷 | PASS；`node tools/install-bridge.mjs --apply` 安装 v0.2.2 载荷（`app/shell-hook/package.json` 0.2.2、hook.cjs VERSION 0.2.2） |
 | 待重启确认 | **未验证（需用户重启 DSH）**：托盘点击深链与空闲完整列表由注入主进程的新桥接实现，当前运行的 DSH 仍在旧桥接进程内；重启后 `bridge.log` 应出现 `window-session-open`（点击会话行时）与完整 idle 行 |

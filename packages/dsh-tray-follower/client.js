@@ -1,9 +1,9 @@
 /**
  * dsh-tray-follower — Client half.
  *
- * Adds two "settings.section" pages to DSH Settings — the preferences page for
- * the Host Config of the `dsh-tray-follower` Loader entry, and an About page —
- * and forwards the bridge's session deep link into the workspace service.
+ * Adds the "托盘随航" page to DSH Settings: one `settings.section` entry whose
+ * in-page tabs hold the preferences (default) and an About sub-view, plus the
+ * bridge's session deep link forwarded into the workspace service.
  *
  * The browser artifact is a plain script registered with the Harness module
  * loader: no JSX and no bundler. React and the app-native UI primitives come
@@ -101,6 +101,15 @@ window.__ModuleLoader__.load({
       },
     ]
 
+    /**
+     * In-page sub-views of the settings page. The preferences are the default
+     * view; About is a tab in the same page, not a separate Settings section.
+     */
+    const TABS = [
+      { id: 'settings', labelKey: 'settingsTab' },
+      { id: 'about', labelKey: 'aboutNav' },
+    ]
+
     /** English copy, complete for every key used by both pages. */
     const en = {
       nav: 'Tray follower',
@@ -132,6 +141,8 @@ window.__ModuleLoader__.load({
       readOnly: 'This deployment stores settings read-only.',
       saveFailed: 'The settings were not saved. Please try again.',
       aboutNav: 'About',
+      settingsTab: 'Settings',
+      tabsLabel: 'Tray follower pages',
       aboutIntro: 'Version, repository, and acknowledgements.',
       aboutGroup: 'Plugin details',
       aboutAuthor: 'Author',
@@ -174,6 +185,8 @@ window.__ModuleLoader__.load({
       readOnly: '本部署的设置为只读。',
       saveFailed: '设置没有保存成功，请重试。',
       aboutNav: '关于',
+      settingsTab: '设置',
+      tabsLabel: '托盘随航页面',
       aboutIntro: '版本信息、代码仓库与致谢。',
       aboutGroup: '插件信息',
       aboutAuthor: '作者',
@@ -217,6 +230,36 @@ window.__ModuleLoader__.load({
       },
       noticeError: {
         color: 'var(--dsw-alias-state-error-primary)',
+      },
+      tabs: {
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: '8px',
+        marginTop: '2px',
+        borderBottom: '1px solid var(--dsw-alias-border-l2)',
+      },
+      tab: {
+        position: 'relative',
+        margin: 0,
+        padding: '7px 1px 9px',
+        border: 0,
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        font: 'inherit',
+        fontSize: '13px',
+        lineHeight: '20px',
+        cursor: 'pointer',
+        boxShadow: 'inset 0 -2px 0 0 transparent',
+      },
+      tabActive: {
+        color: 'var(--dsw-alias-label-primary)',
+        boxShadow: 'inset 0 -2px 0 0 var(--dsw-alias-brand-primary)',
+      },
+      panel: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px',
+        minWidth: 0,
       },
       group: {
         display: 'flex',
@@ -545,6 +588,7 @@ window.__ModuleLoader__.load({
       const snapshot = useFormSnapshot(form)
       const [pending, setPending] = React.useState({})
       const [failed, setFailed] = React.useState(false)
+      const [tab, setTab] = React.useState('settings')
 
       const status = snapshot !== undefined && snapshot !== null ? snapshot.status : 'loading'
       const writable = snapshot !== undefined && snapshot !== null && snapshot.writable === true
@@ -657,6 +701,43 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Arrow/Home/End navigation over the in-page tabs. */
+      const onTabKeyDown = (event, index) => {
+        let nextIndex
+        switch (event.key) {
+          case 'ArrowRight':
+            nextIndex = (index + 1) % TABS.length
+            break
+          case 'ArrowLeft':
+            nextIndex = (index - 1 + TABS.length) % TABS.length
+            break
+          case 'Home':
+            nextIndex = 0
+            break
+          case 'End':
+            nextIndex = TABS.length - 1
+            break
+          default:
+            return
+        }
+        event.preventDefault()
+        setTab(TABS[nextIndex].id)
+        try {
+          const container =
+            event.currentTarget !== null && event.currentTarget !== undefined
+              ? event.currentTarget.parentElement
+              : undefined
+          const buttons =
+            container !== undefined && container !== null && typeof container.querySelectorAll === 'function'
+              ? container.querySelectorAll('[role="tab"]')
+              : []
+          const target = buttons[nextIndex]
+          if (target !== undefined && target !== null && typeof target.focus === 'function') target.focus()
+        } catch {
+          // Focus management is best effort; the panel already switched.
+        }
+      }
+
       const noticeKey =
         status !== 'ready'
           ? status === 'unavailable'
@@ -668,9 +749,77 @@ window.__ModuleLoader__.load({
               ? 'saveFailed'
               : undefined
 
+      const tabs = h(
+        'div',
+        { role: 'tablist', 'aria-label': t('tabsLabel'), style: styles.tabs },
+        TABS.map((candidate, index) => {
+          const selected = tab === candidate.id
+          return h(
+            'button',
+            {
+              key: candidate.id,
+              id: `tray-follower-tab-${candidate.id}`,
+              type: 'button',
+              role: 'tab',
+              'aria-selected': selected,
+              'aria-controls': `tray-follower-panel-${candidate.id}`,
+              tabIndex: selected ? 0 : -1,
+              onClick: () => setTab(candidate.id),
+              onKeyDown: (event) => onTabKeyDown(event, index),
+              style: selected ? Object.assign({}, styles.tab, styles.tabActive) : styles.tab,
+            },
+            t(candidate.labelKey),
+          )
+        }),
+      )
+
+      const panelChildren = []
+      if (tab === 'about') {
+        panelChildren.push(...aboutSections(t))
+      } else {
+        for (const group of GROUPS) {
+          const rows = []
+          for (const row of group.rows) {
+            const divider = rows.length > 0
+            if (row.kind === 'number') {
+              rows.push(
+                numberRow({
+                  t,
+                  field: row.field,
+                  value: readNumber(values, row.field),
+                  disabled,
+                  onBlur: onNumberBlur,
+                  onKeyDown: onNumberKeyDown,
+                  divider,
+                }),
+              )
+            } else {
+              rows.push(
+                toggleRow({
+                  t,
+                  field: row.field,
+                  checked: readToggle(values, row.field),
+                  disabled,
+                  onToggle,
+                  divider,
+                }),
+              )
+            }
+          }
+          panelChildren.push(
+            h(
+              'section',
+              { key: group.titleKey, style: styles.group },
+              h('h3', { style: styles.groupTitle }, t(group.titleKey)),
+              h('div', { style: styles.card }, rows),
+            ),
+          )
+        }
+      }
+
       const children = [
         h('h2', { key: 'heading', style: styles.heading }, t('title')),
-        h('p', { key: 'intro', style: styles.intro }, t('description')),
+        h('p', { key: 'intro', style: styles.intro }, t(tab === 'about' ? 'aboutIntro' : 'description')),
       ]
       if (noticeKey !== undefined) {
         children.push(
@@ -688,57 +837,31 @@ window.__ModuleLoader__.load({
           ),
         )
       }
-
-      for (const group of GROUPS) {
-        const rows = []
-        for (const row of group.rows) {
-          const divider = rows.length > 0
-          if (row.kind === 'number') {
-            rows.push(
-              numberRow({
-                t,
-                field: row.field,
-                value: readNumber(values, row.field),
-                disabled,
-                onBlur: onNumberBlur,
-                onKeyDown: onNumberKeyDown,
-                divider,
-              }),
-            )
-          } else {
-            rows.push(
-              toggleRow({
-                t,
-                field: row.field,
-                checked: readToggle(values, row.field),
-                disabled,
-                onToggle,
-                divider,
-              }),
-            )
-          }
-        }
-        children.push(
-          h(
-            'section',
-            { key: group.titleKey, style: styles.group },
-            h('h3', { style: styles.groupTitle }, t(group.titleKey)),
-            h('div', { style: styles.card }, rows),
-          ),
-        )
-      }
+      children.push(tabs)
+      children.push(
+        h(
+          'div',
+          {
+            key: 'panel',
+            role: 'tabpanel',
+            id: `tray-follower-panel-${tab}`,
+            'aria-labelledby': `tray-follower-tab-${tab}`,
+            style: styles.panel,
+          },
+          panelChildren,
+        ),
+      )
 
       return h('div', { style: styles.page }, children)
     }
 
     /**
-     * The About page: plugin identity, author, repository, license, and the
-     * acknowledgement line with the contributor's profile linked.
-     * @param {{ t: (key: string) => string }} props slot props
-     * @returns the rendered React element tree
+     * The 关于 tab content: plugin identity, author, repository, license, and
+     * the acknowledgement line with the contributor's profile linked.
+     * @param {(key: string) => string} t page translator
+     * @returns {any[]} the About sections, rendered inside the same page
      */
-    function AboutPage(props) {
-      const t = typeof props.t === 'function' ? props.t : (key) => key
+    function aboutSections(t) {
       const acknowledgement = h(
         'p',
         { style: styles.acknowledgement },
@@ -746,11 +869,7 @@ window.__ModuleLoader__.load({
         externalLink({ href: ACKNOWLEDGEMENT_URL, style: styles.link, children: '@DuoZhao2026' }),
         t('ackSuffix'),
       )
-      return h(
-        'div',
-        { style: styles.page },
-        h('h2', { key: 'heading', style: styles.heading }, t('title')),
-        h('p', { key: 'intro', style: styles.intro }, t('aboutIntro')),
+      return [
         h(
           'section',
           { key: 'details', style: styles.group },
@@ -792,16 +911,17 @@ window.__ModuleLoader__.load({
           h('h3', { style: styles.groupTitle }, t('ackGroup')),
           h('div', { style: styles.card }, acknowledgement),
         ),
-      )
+      ]
     }
 
     return {
       /** Required client services: workspace deep links, slots, locale and forms. */
       inject: ['uiWorkspace', 'slots', 'locale', 'configForms'],
       /**
-       * Register dictionaries, the bridge session deep link, and both Settings
-       * pages. Everything is owned by `ctx.effect` / `ctx.slots.inject`, so
-       * unloading the plugin removes all of it.
+       * Register dictionaries, the bridge session deep link, and the one
+       * Settings page whose tabs host the preferences and the About sub-view.
+       * Everything is owned by `ctx.effect` / `ctx.slots.inject`, so unloading
+       * the plugin removes all of it.
        * @param {any} ctx browser plugin context
        */
       apply(ctx) {
@@ -855,18 +975,6 @@ window.__ModuleLoader__.load({
               inject: () => ({ form }),
             },
             SettingsPage,
-          ),
-        )
-        ctx.slots.inject(SLOT, () =>
-          ctx.slots.register(
-            {
-              name: SLOT,
-              id: 'tray-follower-about',
-              order: 31,
-              label: () => t('aboutNav'),
-              locale: NS,
-            },
-            AboutPage,
           ),
         )
       },
