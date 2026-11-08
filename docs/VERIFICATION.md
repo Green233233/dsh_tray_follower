@@ -52,21 +52,42 @@ node tools/probe-electron-hook.mjs --execute --keep
 
 证据文件：`%TEMP%\dsh-tray-follower-e2e-*\logs\probe-evidence.log`、`.../state/bridge.log`（`--keep` 时保留）。
 
-## 3. 真实运行实例（待用户重启后验证）
+## 3. 桥接安装与启动链路（已安装，实测链路通过）
 
-当前正在运行的 DSH 是普通方式启动（无 `--inspect`），桥接无法注入；需要安装启动器并用它重启 DSH 后，
-才能在真实托盘图标里看到扩展菜单。待办：
+安装命令：
 
-- [ ] 安装桥接启动器（`node tools/install-bridge.mjs --apply`，会备份并替换开始菜单快捷方式）
-- [ ] 完全退出 DSH，用新快捷方式启动
+```powershell
+node tools/install-bridge.mjs --apply
+```
+
+结果（2026-11-08 08:13）：
+
+| 检查项 | 结果 |
+|---|---|
+| app 载荷 | PASS；`%LOCALAPPDATA%\dsh-tray-follower\app\{shell-hook,injector,launcher}` + `install.json` |
+| 开始菜单快捷方式 | PASS；target=`wscript.exe`，args=`"...\app\launcher\launch-bridge.vbs" "...\dsh-tray-follower"`，原文件备份至 `backup\shortcuts\01-DeepSeek Harness.lnk` |
+| 桌面快捷方式 | PASS；同上，备份 `backup\shortcuts\02-DeepSeek Harness.lnk` |
+| 任务栏固定项 | 本机无 DSH 任务栏固定项，无需处理（安装器会处理存在的 `User Pinned\TaskBar` 快捷方式） |
+| 可逆性 | PASS；`node tools/uninstall-bridge.mjs`（dry-run）正确列出两条快捷方式还原计划与 app 载荷删除计划 |
+| 启动链路（DSH 已运行时） | PASS；直接运行 VBS → PS1（隐藏）→ `launch.mjs`，正确识别已运行主进程 pid=14136、写 `injector.log`（`already-running`）、以普通模式拉起实例聚焦已有窗口，未产生多余常驻进程，弹出“请先完全退出 DSH”提示 |
+
+## 4. 真实运行实例（待用户重启后验证）
+
+当前正在运行的 DSH 是普通方式启动（无 `--inspect`），桥接无法注入；已安装桥接启动器并替换快捷方式，
+需要用户完全退出 DSH、从快捷方式重新启动后验证真实效果。待办：
+
+- [x] 安装桥接启动器（`node tools/install-bridge.mjs --apply`，已备份并替换开始菜单/桌面快捷方式）
+- [ ] 完全退出 DSH，用新快捷方式启动（启动时注入桥接）
 - [ ] 右键托盘图标：确认原「打开/退出」之外出现工作区/会话状态区
 - [ ] 最小化 DSH，触发一次需要批准的对话：确认出现 DeepSeek Harness 名义的系统通知
 - [ ] 隐藏 DSH，等待会话完成：确认「任务完成」通知
+- [ ] 检查 `%LOCALAPPDATA%\dsh-tray-follower\bridge.log`（应有 `hook-loaded`、`tray-adopted`、`menu-rebuilt`）
 - [ ] 启动器失败回退：确认 `injector.log` 与普通模式启动
 
-## 4. 已执行的安全/回滚检查
+## 5. 已执行的安全/回滚检查
 
 - `tools/install-bridge.mjs` / `tools/uninstall-bridge.mjs` 默认 dry-run（不修改任何文件），`--apply` 才执行；
-  原 `.lnk` 做字节级备份，卸载时原样恢复。
-- 注入器只绑定 `127.0.0.1` 并使用随机可用端口；注入完成后调用 `node:inspector.close()` 关闭端口。
+  原 `.lnk` 做字节级备份，卸载时原样恢复（已实测 dry-run 计划正确）。
+- 注入器只绑定 `127.0.0.1` 并使用可用端口；注入完成后调用 `node:inspector.close()` 关闭端口。
 - 未修改 DSH 安装目录、未改系统/用户环境变量。
+- 桥接未安装/注入失败时行为：启动器以普通模式重新拉起 DSH（不阻塞用户使用），不启动任何外部通知进程。
