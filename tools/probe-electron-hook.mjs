@@ -64,7 +64,7 @@ const EXPECTED_LABELS = [
   '✓ 已完成的对话',
   '📁 Probe Workspace B  运行 0 · 待处理 0',
   '（无对话）',
-  'dsh-tray-follower v0.2.0'
+  'dsh-tray-follower v0.2.2'
 ]
 /** Contract-v2 defaults: idle rows and the idle submenu must be absent. */
 const FORBIDDEN_IDLE_PREFIXES = ['空闲会话', '○ ']
@@ -278,7 +278,7 @@ function buildFixtureState() {
  * Render the fixture through the same state/menu-model code the hook uses and
  * return the exact labels the isolated E2E run must observe. Used by the dry run
  * so `EXPECTED_HEADER` / `EXPECTED_LABELS` cannot silently drift from the fixture
- * or from the v0.2.0 menu behavior.
+ * or from the v0.2.2 menu behavior.
  */
 function previewFixtureMenu() {
   const normalized = stateLib.normalizeState(buildFixtureState())

@@ -1,4 +1,4 @@
-# 设计：DSH 托盘跟随者（dsh-tray-follower）
+# 设计：DSH 托盘随航（dsh-tray-follower）
 
 ## 1. 需求拆解
 
@@ -95,7 +95,7 @@
 
 ### 4.1 用户在 DSH 设置中可调的选项（v2 新增）
 
-Host 插件用 `Config`（`@deepseek-ai/schemastery`，全部 `.volatile()`）声明下列字段；Host 每次写状态文件时读取**实时值**（`config[k].get()`），因此设置页保存后 ≤1s 生效，无需重启 DSH。Client 半在 **设置 → 托盘跟随** 注册页面，通过 `ctx.configForms.get('dsh-tray-follower')` 读写同一份 Config。
+Host 插件用 `Config`（`@deepseek-ai/schemastery`，全部 `.volatile()`）声明下列字段；Host 每次写状态文件时读取**实时值**（`config[k].get()`），因此设置页保存后 ≤1s 生效，无需重启 DSH。Client 半在 **设置 → 托盘随航** 注册页面，通过 `ctx.configForms.get('dsh-tray-follower')` 读写同一份 Config。
 
 | 字段 | 类型/默认 | 分组 | 作用 |
 |---|---|---|---|

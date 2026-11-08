@@ -175,6 +175,31 @@ function createBridge(options = {}) {
     }
   }
 
+  /**
+   * Tray session-row click: focus/restore the DSH window and ask the renderer to
+   * open the conversation (`dsh-tray-follower:open-session` DOM event consumed by
+   * the plugin's Client half). Never throws from the menu callback.
+   */
+  function openSessionInWindow(sessionId) {
+    try {
+      if (!bridge.windows || typeof bridge.windows.openSession !== 'function') {
+        logger.log('focus-request', { reason: 'tray-session-open', ok: false, error: 'window-helper-unavailable', sessionId })
+        return { ok: false, reason: 'window-helper-unavailable' }
+      }
+      const result = bridge.windows.openSession(sessionId)
+      logger.log('focus-request', {
+        reason: 'tray-session-open',
+        sessionId,
+        ok: result.ok === true,
+        error: result.reason || null
+      })
+      return result
+    } catch (error) {
+      fail('open-session-in-window', error)
+      return { ok: false, error: describeError(error) }
+    }
+  }
+
   function quitApplication() {
     try {
       api.app.quit()
@@ -414,7 +439,10 @@ function createBridge(options = {}) {
       const template = [
         ...bridge.originalTemplate,
         { type: 'separator' },
-        ...toElectronTemplate(section, { focus: () => focusMainWindow('tray-session') })
+        ...toElectronTemplate(section, {
+          focus: () => focusMainWindow('tray-session'),
+          openSession: (sessionId) => openSessionInWindow(sessionId)
+        })
       ]
       let applied = 0
       let buildError = null
@@ -641,7 +669,7 @@ function createBridge(options = {}) {
       const shown = showNotification(
         {
           kind: 'test',
-          title: 'DSH 托盘跟随（自检）',
+          title: 'DSH 托盘随航（自检）',
           body: `桥接已注入 Electron 主进程；托盘 ${diagnostics.adoptedTrayCount} 个，菜单重建 ${diagnostics.menuRebuilds} 次。`,
           eventIds: [],
           silent

@@ -166,7 +166,7 @@ index.js              Host plugin: Config schema, services, events, timers, stat
 lib/                  pure modules (unit-tested with node --test)
 client.js             Client half: Settings → Tray follower page (settings.section)
 locale/en.json        meta.title "Tray follower" / meta.description
-locale/zh.json        meta.title "托盘跟随者" / meta.description
+locale/zh.json        meta.title "托盘随航" / meta.description
 icon.svg              original icon (SVG, < 64 KiB)
 test/*.test.mjs       node --test suites
 ```

@@ -201,10 +201,16 @@ function createFakeElectron(options = {}) {
 }
 
 function createFakeWindow(options = {}) {
-  const record = { restored: 0, shown: 0, focused: 0 }
+  const record = { restored: 0, shown: 0, focused: 0, scripts: [] }
   const window = {
     record,
-    webContents: { getURL: () => options.url || 'dsh-app://app/' },
+    webContents: {
+      getURL: () => options.url || 'dsh-app://app/',
+      executeJavaScript: (script) => {
+        record.scripts.push(script)
+        return Promise.resolve(true)
+      }
+    },
     isDestroyed: () => options.destroyed === true,
     isVisible: () => options.visible !== false,
     isMinimized: () => options.minimized === true,
@@ -408,8 +414,8 @@ test('state: v2 without options warns and uses defaults; unsupported schema pars
   assert.ok(future.warnings.some((warning) => warning.includes('schemaVersion')))
 })
 
-test('constants: version 0.2.0 and contract schema v2', () => {
-  assert.equal(constants.VERSION, '0.2.0')
+test('constants: version 0.2.2 and contract schema v2', () => {
+  assert.equal(constants.VERSION, '0.2.2')
   assert.equal(constants.SCHEMA_VERSION, 2)
   assert.deepEqual([...constants.SUPPORTED_SCHEMA_VERSIONS], [1, 2])
 })
@@ -518,9 +524,11 @@ test('menu: showFooter=false removes the version footer', () => {
   assert.equal(section[section.length - 1].kind, 'workspace')
 })
 
-test('menu: idle sessions are collapsed into a bounded submenu when showIdle=true', () => {
+test('menu: all idle sessions are listed newest-first (no 10-row cap)', () => {
   const sessions = []
-  for (let index = 0; index < 13; index += 1) sessions.push({ id: `i${index}`, title: `idle ${index}`, status: 'idle' })
+  for (let index = 0; index < 25; index += 1) {
+    sessions.push({ id: `idle-${index}`, title: `idle ${index}`, status: 'idle', updatedAt: 1000 + index })
+  }
   sessions.push({ id: 'run', title: 'run', status: 'running' })
   const read = stateModule.normalizeState(
     sampleState({
@@ -529,14 +537,40 @@ test('menu: idle sessions are collapsed into a bounded submenu when showIdle=tru
       workspaces: [{ id: 'w', title: 'W', sessions }]
     })
   )
-  const section = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   assert.equal(workspace.label, '📁 W  运行 1 · 待处理 0')
   assert.equal(workspace.submenu.filter((item) => item.kind === 'session').length, 1, 'idle rows must not be inline')
   const idleGroup = workspace.submenu.find((item) => item.kind === 'idle-group')
-  assert.equal(idleGroup.label, '空闲会话 (13)')
-  assert.equal(idleGroup.submenu.filter((item) => item.kind === 'session').length, 10)
-  assert.equal(idleGroup.submenu[idleGroup.submenu.length - 1].label, '… 还有 3 个会话')
+  assert.equal(idleGroup.label, '空闲会话 (25)', 'group label keeps the full count')
+  const idleRows = idleGroup.submenu.filter((item) => item.kind === 'session')
+  assert.equal(idleRows.length, 25, 'all idle sessions must be listed (old cap was 10)')
+  assert.equal(idleGroup.submenu.some((item) => item.kind === 'placeholder'), false, 'no overflow below the hard cap')
+  assert.equal(idleRows[0].label, '○ idle 24', 'newest updatedAt first')
+  assert.equal(idleRows[idleRows.length - 1].label, '○ idle 0', 'oldest last')
+  assert.equal(idleRows[0].sessionId, 'idle-24')
+  assert.equal(idleRows[0].workspaceId, 'w')
+})
+
+test('menu: idle submenu truncates only past the hard cap (100)', () => {
+  const sessions = []
+  for (let index = 0; index < 105; index += 1) {
+    sessions.push({ id: `idle-${index}`, title: `idle ${index}`, status: 'idle', updatedAt: 1000 + index })
+  }
+  // Raw state object (bypasses normalization) to prove the menu-model hard cap.
+  const rawState = {
+    schemaVersion: 2,
+    options: { tray: { showIdle: true } },
+    stats: { running: 0, pending: 0 },
+    workspaces: [{ id: 'w', title: 'W', sessions }]
+  }
+  const section = menuModel.buildStatusSection(rawState, { version: '0.2.2', locale: 'zh-CN' })
+  const workspace = section.find((item) => item.kind === 'workspace')
+  const idleGroup = workspace.submenu.find((item) => item.kind === 'idle-group')
+  assert.equal(idleGroup.label, '空闲会话 (105)')
+  const idleRows = idleGroup.submenu.filter((item) => item.kind === 'session')
+  assert.equal(idleRows.length, constants.LIMITS.maxSessionsPerWorkspace)
+  assert.equal(idleGroup.submenu[idleGroup.submenu.length - 1].label, '… 还有 5 个会话')
 })
 
 test('menu: English strings for non-zh locales', () => {
@@ -603,6 +637,60 @@ test('menu: toElectronTemplate maps descriptors and click focuses', () => {
   template[1].submenu[0].click()
   assert.equal(focused, 1)
   assert.equal(template[2].enabled, false)
+})
+
+test('menu: session nodes carry sessionId/workspaceId (active and idle)', () => {
+  const read = stateModule.normalizeState(
+    sampleState({
+      schemaVersion: 2,
+      options: { tray: { showIdle: true } },
+      workspaces: [
+        {
+          id: 'ws-1',
+          title: 'W',
+          sessions: [
+            { id: 'session-active-1', title: 'active', status: 'running' },
+            { id: 'session-idle-1', title: 'idle', status: 'idle', updatedAt: 5 }
+          ]
+        }
+      ]
+    })
+  )
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
+  const workspace = section.find((item) => item.kind === 'workspace')
+  const active = workspace.submenu.find((item) => item.kind === 'session')
+  assert.equal(active.sessionId, 'session-active-1')
+  assert.equal(active.workspaceId, 'ws-1')
+  const idleGroup = workspace.submenu.find((item) => item.kind === 'idle-group')
+  const idle = idleGroup.submenu.find((item) => item.kind === 'session')
+  assert.equal(idle.sessionId, 'session-idle-1')
+  assert.equal(idle.workspaceId, 'ws-1')
+})
+
+test('menu: session click calls openSession with the session id (focus fallback)', () => {
+  const read = stateModule.normalizeState(sampleState())
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
+  const opened = []
+  let focused = 0
+  const template = menuModel.toElectronTemplate(section, {
+    focus: () => (focused += 1),
+    openSession: (sessionId) => opened.push(sessionId)
+  })
+  const workspace = template.find((item) => Array.isArray(item.submenu))
+  const sessionItem = workspace.submenu.find((item) => typeof item.click === 'function')
+  assert.ok(sessionItem, 'session rows must be clickable')
+  sessionItem.click()
+  assert.equal(opened.length, 1)
+  assert.match(opened[0], /^s_/)
+  assert.equal(focused, 0, 'openSession takes precedence over plain focus')
+
+  // No openSession provided -> legacy focus fallback.
+  const fallbackTemplate = menuModel.toElectronTemplate(section, { focus: () => (focused += 1) })
+  fallbackTemplate
+    .find((item) => Array.isArray(item.submenu))
+    .submenu.find((item) => typeof item.click === 'function')
+    .click()
+  assert.equal(focused, 1)
 })
 
 // --- notification policy -----------------------------------------------------
@@ -926,6 +1014,42 @@ test('windows: focus helper restores, shows and focuses', () => {
   assert.equal(state.found, true)
 })
 
+test('windows: openSession focuses and dispatches dsh-tray-follower:open-session with the JSON id', () => {
+  const main = createFakeWindow({ url: 'dsh-app://app/', visible: true, focused: false })
+  const logs = []
+  const helper = windowsModule.createWindowHelper({
+    BrowserWindow: { getAllWindows: () => [main] },
+    app: {},
+    log: (message, data) => logs.push({ message, data })
+  })
+  const result = helper.openSession('session-1234-abcd')
+  assert.equal(result.ok, true)
+  assert.equal(main.record.focused, 1, 'window is focused before dispatching')
+  assert.equal(main.record.scripts.length, 1)
+  const script = main.record.scripts[0]
+  assert.ok(script.startsWith('window.dispatchEvent(new CustomEvent('))
+  assert.ok(script.includes('dsh-tray-follower:open-session'), 'exact event name')
+  assert.ok(script.includes('"session-1234-abcd"'), 'JSON-quoted session id')
+  assert.ok(logs.some((entry) => entry.message === 'window-session-open' && entry.data.ok === true))
+
+  // Invalid ids are rejected and never executed in the renderer.
+  for (const invalid of ['', 'bad id!', null, 'x'.repeat(129)]) {
+    const rejected = helper.openSession(invalid)
+    assert.equal(rejected.ok, false)
+    assert.equal(rejected.reason, 'invalid-session-id')
+  }
+  assert.equal(main.record.scripts.length, 1)
+})
+
+test('windows: openSession cannot throw without a window or executeJavaScript', () => {
+  const noWindowHelper = windowsModule.createWindowHelper({ BrowserWindow: { getAllWindows: () => [] }, app: {}, log: () => {} })
+  assert.deepEqual(noWindowHelper.openSession('session-1'), { ok: false, reason: 'no-window' })
+
+  const window = { webContents: { getURL: () => 'dsh-app://app/' }, isDestroyed: () => false, isVisible: () => true, isFocused: () => false, isMinimized: () => false, focus() {} }
+  const helper = windowsModule.createWindowHelper({ BrowserWindow: { getAllWindows: () => [window] }, app: {}, log: () => {} })
+  assert.equal(helper.openSession('session-1').ok, false)
+})
+
 // --- bridge core smoke -------------------------------------------------------
 
 test('bridge: patch + adoption + menu rebuild from captured shell items', async () => {
@@ -967,13 +1091,28 @@ test('bridge: patch + adoption + menu rebuild from captured shell items', async 
     assert.ok(labels.includes('📁 dsh_tray_follower  运行 1 · 待处理 1'), `missing workspace row: ${labels.join(' | ')}`)
     assert.ok(labels.includes('▶ 配置 Git 等工程管理'))
     assert.ok(labels.includes('⏸ 等待批准'))
-    assert.ok(labels.includes('dsh-tray-follower v0.2.0'))
+    assert.ok(labels.includes('dsh-tray-follower v0.2.2'))
     assert.equal(bridge.diagnostics().capturedItemCount, 3, 'captured template must be the shell menu, not the merged menu')
 
     // The captured original click handler still works after the rebuild.
     const rebuiltOpen = lastMenu.items.find((item) => item.label === '打开 DeepSeek Harness')
     rebuiltOpen.click()
     assert.equal(openClicks, 1)
+
+    // A session row click deep-links: the renderer gets the open-session event with
+    // the conversation id, instead of only focusing the window.
+    const workspaceItem = lastMenu.items.find(
+      (item) => Array.isArray(item.submenu) && item.submenu.some((child) => typeof child.click === 'function')
+    )
+    assert.ok(workspaceItem, 'workspace submenu with session rows expected')
+    const sessionItem = workspaceItem.submenu.find(
+      (child) => typeof child.click === 'function' && child.label.startsWith('▶')
+    )
+    assert.ok(sessionItem, 'running session row expected')
+    sessionItem.click()
+    assert.equal(window.record.scripts.length, 1)
+    assert.ok(window.record.scripts[0].includes('dsh-tray-follower:open-session'))
+    assert.ok(window.record.scripts[0].includes('"s_1"'), 'JSON-quoted session id must be dispatched')
 
     // Simulated shell relabel(): the patched method captures the shell menu again
     // and the bridge rebuilds without duplicating its own status section.
@@ -1263,7 +1402,7 @@ test('bridge: test mode writes diagnostics and self-test notification; finalize 
     const tray = new electron.Tray()
     tray.setContextMenu(new electron.Menu([{ label: 'Open', click: () => {} }]))
     bridge.pollNow('test')
-    assert.ok(fake.shownNotifications.some((item) => item.title === 'DSH 托盘跟随（自检）'))
+    assert.ok(fake.shownNotifications.some((item) => item.title === 'DSH 托盘随航（自检）'))
     const testDiagnostics = bridge.diagnostics()
     assert.equal(testDiagnostics.notifications.provider, 'electron-main-process')
     assert.equal(testDiagnostics.notifications.supported, true)

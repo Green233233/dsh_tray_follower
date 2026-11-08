@@ -15,12 +15,14 @@
   - 全局摘要 `对话：N 运行 / M 待处理`；
   - 每个工作区一个子菜单：`📁 <工作区名>  运行 N · 待处理 M`，内含按优先级排序的会话行
     （`⏸` 等待批准/选择/输入 → `▶` 运行中 → `✓` 已完成 / `✖` 失败，最多 6 行 + 溢出提示）；
-  - **空闲对话默认不显示**（托盘菜单只列真正在工作的对话；可在设置里重新打开）；
-  - 点击任意会话行可把 DSH 窗口显示并聚焦。
-- **原生设置页**：DSH **设置 → 托盘跟随**（`settings.section`，由插件 Client 半注册）：
+  - **空闲对话默认不显示**；打开后按最新优先完整列出（不再截断）；
+  - 点击任意会话行会显示 DSH 窗口并**直接跳转到该对话**。
+- **原生设置页**：DSH **设置 → 托盘随航**（`settings.section`，由插件 Client 半注册）：
   - 「托盘右键菜单」：显示空闲对话、每工作区最大行数（1–20）、顶部计数、版本页脚；
   - 「通知」：完成通知、失败通知、需要人工介入通知、前台时静默、提示音。
+  - 开关使用 DSH 自带 `Switch` 组件，与系统其余设置一致；
   - 设置是 Host `Config`（`.volatile()`），保存后 ≤1 秒生效，**无需重启 DSH**。
+- **关于页**：DSH **设置 → 关于**，含作者 Green233233、仓库与许可证链接，以及致谢。
 - **系统通知**：当 DSH 窗口隐藏/最小化/失焦时，对未读事件发原生通知（点击通知聚焦窗口）：
   - `needs-attention`：需要你批准 / 选择 / 输入；
   - `completed`：会话完成目标 / 结束工作；
@@ -104,9 +106,14 @@ node scripts/build-market-package.mjs            # 产出 dist/ 单包发布物 
 ## 发布状态
 
 - GitHub 仓库：<https://github.com/Green233233/dsh_tray_follower>（MIT）
-- 发布包：<https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.0>（tarball 安装：dsh plugin --profile desktop add <tarball-url>）
-- dshmarket 收录 PR：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145>（数据文件 data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml；自动检查中，仓库满 1 天后年龄项自动通过）
+- 最新发布：<https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.2>（安装：`dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.2/dsh-tray-follower-0.2.2.tgz`）
+- dshmarket 收录 PR：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145>（数据文件 `data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml`；仓库满 1 天后年龄项自动通过）
 - npm：暂未发布（本机无 npm 登录凭据）；目录条目使用 GitHub Release tarball 安装
+
+## 作者与致谢
+
+- 作者：Green233233（<https://github.com/Green233233>）
+- 致谢：感谢@DuoZhao2026（<https://github.com/DuoZhao2026>）提供的情感支持。谢谢小不点er ✧٩(ˊᗜˋ*)و✧
 
 ## 已知限制
 

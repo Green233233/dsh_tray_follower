@@ -18,7 +18,7 @@ the Electron main process), so Windows attributes them to the DSH application
 itself. The plugin never starts an external PowerShell/WinRT/notify-send
 notifier.
 
-> **Status:** 0.2.0 — Windows 10/11, DSH Desktop 0.2.2-rc.1 or newer.
+> **Status:** 0.2.2 — Windows 10/11, DSH Desktop 0.2.2-rc.1 or newer.
 
 ---
 
@@ -57,7 +57,7 @@ Conversations: 1 running / 2 waiting      (disabled header)
    … 3 more conversations                 (only when over the row limit)
 📁 default-workspace  0 running · 1 waiting
    ❓ Choose an option
-dsh-tray-follower v0.2.0                  (footer, can be hidden)
+dsh-tray-follower v0.2.2                  (footer, can be hidden)
 ```
 
 - Conversations are grouped by workspace and ordered by urgency:
@@ -80,7 +80,7 @@ deduplicated, rate-limited, never replayed on restart, and silenced while the
 window is focused (configurable). A conversation that is following a goal does
 not notify between rounds — only when the goal itself completes or blocks.
 
-**Settings page.** **Settings → Tray follower** (设置 → 托盘跟随) with two groups
+**Settings page.** **Settings → Tray follower** (设置 → 托盘随航) with two groups
 (tray menu, notifications). Every change applies live — no DSH restart.
 
 ## Screenshots
@@ -120,7 +120,7 @@ _Screenshots are added with the marketplace listing:_
 1. Open **Settings → Plugins** (插件) in DSH Desktop and use **Add plugin** with the tarball URL:
 
 ```powershell
-dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz
+dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.2/dsh-tray-follower-0.2.2.tgz
 ```
 
 2. Enable the plugin row if it is installed disabled.
@@ -232,7 +232,7 @@ A DSH update may recreate the Start Menu shortcut; re-run
 
 ## Settings reference
 
-**Settings → Tray follower** (设置 → 托盘跟随). All options are stored in the
+**Settings → Tray follower** (设置 → 托盘随航). All options are stored in the
 DSH plugin configuration and published in `state.json` as
 `options.tray.*` / `options.notifications.*`, so the bridge reacts within about a
 second — **no DSH restart**.
@@ -372,7 +372,7 @@ DeepSeek Harness），不使用任何外部 PowerShell/WinRT 通知进程。
   （批准 / 选择 / 输入）→ 运行中 → 已完成 / 失败；点击会话行可聚焦 DSH 窗口。
 - **空闲对话默认不显示**，可在设置里打开；每个工作区内联行数、顶部计数、版本页脚均可配置。
 - 通知：需要人工介入 / 完成 / 失败；窗口聚焦时不打扰、去重、限流、不回顾旧事件、点击通知回到 DSH。
-- **设置 → 托盘跟随**（9 项，保存后约 1 秒生效，无需重启）。
+- **设置 → 托盘随航**（9 项，保存后约 1 秒生效，无需重启）。
 
 **安装**
 

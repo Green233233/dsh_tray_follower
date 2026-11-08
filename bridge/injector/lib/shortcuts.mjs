@@ -154,6 +154,6 @@ export function launcherShortcutFields(options = {}) {
     arguments: `"${vbs}" "${dataDir}"`,
     workingDirectory: dshExe ? path.dirname(dshExe) : dataDir,
     iconLocation: dshExe ? `${dshExe},0` : '',
-    description: 'DeepSeek Harness (dsh-tray-follower 托盘跟随模式)'
+    description: 'DeepSeek Harness (dsh-tray-follower 托盘随航模式)'
   }
 }

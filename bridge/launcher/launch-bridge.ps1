@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 function Show-Message([string]$Text, [int]$Icon) {
   try {
     $shell = New-Object -ComObject WScript.Shell
-    [void]$shell.Popup($Text, 30, 'DSH 托盘跟随', $Icon)
+    [void]$shell.Popup($Text, 30, 'DSH 托盘随航', $Icon)
   } catch {
     # No UI available: silently continue.
   }
@@ -85,14 +85,14 @@ try {
   $detail = ($lines -join "`r`n")
 
   if ($exitCode -eq 4) {
-    Show-Message ("DeepSeek Harness 已在运行。`r`n`r`n托盘跟随桥接只能在 DSH 启动时注入；请先完全退出 DSH" +
+    Show-Message ("DeepSeek Harness 已在运行。`r`n`r`n托盘随航桥接只能在 DSH 启动时注入；请先完全退出 DSH" +
       "（右键托盘图标 → 退出），再从本快捷方式启动。`r`n`r`n" + $detail) 48
     exit 4
   }
 
-  Show-Message ("托盘跟随桥接启动失败（退出码 " + [string]$exitCode + "）。`r`n`r`n" + $detail) 16
+  Show-Message ("托盘随航桥接启动失败（退出码 " + [string]$exitCode + "）。`r`n`r`n" + $detail) 16
   exit $exitCode
 } catch {
-  Show-Message ("托盘跟随启动脚本异常：" + $_.Exception.Message) 16
+  Show-Message ("托盘随航启动脚本异常：" + $_.Exception.Message) 16
   exit 1
 }

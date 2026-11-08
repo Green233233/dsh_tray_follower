@@ -28,7 +28,7 @@
 `node --check` 覆盖全部 JS。
 
 > v0.2.0 更新：Host 半现在提供 `Config` schema（9 个 `.volatile()` 字段），`state.json` 升级为
-> `schemaVersion: 2` 并带 `options`；Client 半注册「设置 → 托盘跟随」页面。详见 §6。
+> `schemaVersion: 2` 并带 `options`；Client 半注册「设置 → 托盘随航」页面。详见 §6。
 
 ## 2. 桥接层（隔离实例 E2E，已 PASS）
 
@@ -138,3 +138,25 @@ node tools/install-bridge.mjs --apply
 ### 6.3 上架物料
 
 `LICENSE`、`CHANGELOG.md`、`marketplace/{package-readme.md, awesome-plugin-entry.json, market-index-entry.json, PUBLISHING.md, VALIDATION.md}`、`scripts/build-market-package.mjs` 均已就绪；发布需 npm 凭据与 awesome-dsh-plugin PR（本机不执行），步骤见 `marketplace/PUBLISHING.md`。
+
+## 7. v0.2.2 功能验证（关于页 / 深链 / 空闲完整 / 改名 / 原生 Switch）
+
+### 7.1 代码与自检（本机实测）
+
+| 检查项 | 结果 |
+|---|---|
+| 插件测试 | `node --test "packages/dsh-tray-follower/test/*.test.mjs"` → **79/79 PASS**（client 11：About 槽位、致谢逐字断言、链接、原生 Switch、深链事件、改名） |
+| 桥接自检 | `node tools/bridge-selftest.mjs` → **72/72 PASS**（sessionId 传递、点击调用 openSession、25 条 idle 全列且 newest-first、windows.openSession 脚本断言事件名与 JSON 引号化 id、无效 id/无窗口不抛） |
+| 全仓检查 | `node tools/check.mjs` → all checks passed |
+| 隔离实例 E2E（v0.2.2） | `node tools/probe-electron-hook.mjs --execute` → **PROBE RESULT: PASS**；footer `dsh-tray-follower v0.2.2`，自检通知标题 `DSH 托盘随航（自检）`，v2 默认值/空闲隐藏/原生通知断言全部通过 |
+| 版本 | 插件与桥接 package.json、hook/constants 均为 **0.2.2**；`dist/` 重新构建为 0.2.2 |
+
+### 7.2 Live 安装验证（Host/Client 热重载，无需重启）
+
+| 检查项 | 结果 |
+|---|---|
+| 插件热重载 | PASS；`plugin_manager set_bundle` 关闭/开启后 `state.json` 继续以 `schemaVersion: 2` + `options` 刷新 |
+| 设置页注册 | PASS；`cordis_inspect_query client Slots root=settings.section` occupants：`tray-follower`(order 30) 与 `tray-follower-about`(order 31) 均 active |
+| 中文名 | PASS；`locale/zh.json` meta.title = 托盘随航，客户端 nav/title = 托盘随航（测试断言） |
+| 桥接载荷 | PASS；`node tools/install-bridge.mjs --apply` 安装 v0.2.2 载荷（`app/shell-hook/package.json` 0.2.2、hook.cjs VERSION 0.2.2） |
+| 待重启确认 | **未验证（需用户重启 DSH）**：托盘点击深链与空闲完整列表由注入主进程的新桥接实现，当前运行的 DSH 仍在旧桥接进程内；重启后 `bridge.log` 应出现 `window-session-open`（点击会话行时）与完整 idle 行 |

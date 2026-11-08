@@ -1,4 +1,4 @@
-# dsh-tray-follower — DSH Desktop shell bridge (v0.2.0)
+# dsh-tray-follower — DSH Desktop shell bridge (v0.2.2)
 
 This is the **optional native desktop half** of `dsh-tray-follower`. It runs inside
 the DSH Desktop Electron **main process**, extends the Windows system-tray menu
@@ -10,6 +10,9 @@ Since **v0.2.0** the bridge is settings-driven through the state contract v2
 the tray menu by default, and row counts / header counts / footer as well as the
 notification kind filters, focus suppression and sound are controlled by the DSH
 settings page. Older v1 state files keep working with exactly these defaults.
+**v0.2.2** adds tray-row deep links (clicking a conversation opens it in DSH via
+the `dsh-tray-follower:open-session` renderer event) and lists the complete idle
+history (newest first).
 
 The other half is the DSH plugin bundle in `packages/dsh-tray-follower/`, which
 tracks conversations and publishes `%LOCALAPPDATA%\dsh-tray-follower\state.json`
@@ -137,14 +140,16 @@ handlers preserved). On every state change the bridge rebuilds:
    … 还有 3 个会话                         (disabled overflow, only if > maxSessionsPerWorkspace)
 📁 default-workspace  运行 1 · 待处理 0
    …
-dsh-tray-follower v0.2.0                 (disabled footer; settings: showFooter)
+dsh-tray-follower v0.2.2                 (disabled footer; settings: showFooter)
 ```
 
 - **Idle conversations are hidden by default** (`options.tray.showIdle=false`,
   contract v2). Only when the user enables “also list idle conversations” in DSH
   settings do they appear, and then they are collapsed into one
-  `空闲会话 (N)` / `Idle sessions (N)` submenu (up to 10 rows) instead of inline
-  rows. Idle sessions are never listed inline.
+  `空闲会话 (N)` / `Idle sessions (N)` submenu **listing the complete idle
+  history, newest first** (`updatedAt` desc, then title). A work of up to 100 idle
+  conversations is listed in full (only pathological counts beyond that hard cap
+  get an overflow row). Idle sessions are never listed inline.
 - Session order per workspace: `waiting-approval` / `waiting-choice` /
   `waiting-input` first, then `running`, then `completed` / `failed`.
 - At most `options.tray.maxSessionsPerWorkspace` active rows (1..20, default 6)
@@ -152,8 +157,15 @@ dsh-tray-follower v0.2.0                 (disabled footer; settings: showFooter)
 - `options.tray.showHeaderCounts=false` renders the global header as `对话` /
   `Conversations` (without counts); `options.tray.showFooter=false` removes the
   version footer.
-- Rows use the status glyphs `▶ ⏸ ❓ ⌨ ✓ ✖ ○`; clicking a session row focuses the
-  DSH window.
+- Rows use the status glyphs `▶ ⏸ ❓ ⌨ ✓ ✖ ○`. **Clicking any session row (active
+  or idle) opens that conversation in DSH**: the bridge focuses/restores the
+  window, then dispatches
+  `window.dispatchEvent(new CustomEvent('dsh-tray-follower:open-session', { detail: "<sessionId>" }))`
+  in the DSH renderer; the plugin's Client half listens for that event and calls
+  its session-navigation API. Session ids are validated as
+  `^[A-Za-z0-9._:-]{1,128}$` before being embedded (JSON-quoted) in the script.
+  If the renderer event cannot be delivered the click still focuses the window
+  (legacy behaviour), and a menu callback never throws.
 - Chinese labels when Electron's locale starts with `zh`, English otherwise.
 - Late injection (manual `inject.mjs` into an already-running DSH) is supported:
   the bridge adopts the existing Tray from the V8 heap and reconstructs equivalent
@@ -168,7 +180,7 @@ defaults, and `maxSessionsPerWorkspace` is clamped to 1..20.
 
 | Field | Default | Effect |
 | --- | --- | --- |
-| `options.tray.showIdle` | `false` | also list idle conversations (collapsed submenu) |
+| `options.tray.showIdle` | `false` | also list the complete idle history (collapsed submenu, newest first) |
 | `options.tray.maxSessionsPerWorkspace` | `6` | max inline session rows per workspace |
 | `options.tray.showHeaderCounts` | `true` | global header shows `对话：N 运行 / M 待处理` |
 | `options.tray.showFooter` | `true` | show the `dsh-tray-follower vX.Y.Z` footer |
@@ -246,7 +258,7 @@ crash DSH; the plugin half still works without the bridge (fallback toasts).
 node tools/bridge-selftest.mjs
 ```
 
-67 tests cover state parsing/normalization (contract v1 **and** v2 options with
+72 tests cover state parsing/normalization (contract v1 **and** v2 options with
 clamping/fallbacks), menu model (priority order, idle hidden by default /
 optional idle submenu, settings-driven row limit, header counts / footer toggles,
 overflow, zh/en labels, placeholders), notification policy (dedupe, baseline,
@@ -286,7 +298,7 @@ Expected evidence (printed as `PASS …` lines, exit code 0):
 - `original menu items present: …` (shell-captured Open/Quit, or the localized
   reconstructed items when adoption happened first)
 - `notification API is in-process Electron Notification (provider=electron-main-process, isSupported=true) — attributed to DeepSeek Harness, no external notifier process`
-- `native notification evidenced (test): DSH 托盘跟随（自检）`
+- `native notification evidenced (test): DSH 托盘随航（自检）`
 - `PROBE RESULT: PASS`
 
 Cleanup: the probe quits the isolated instance through its own API

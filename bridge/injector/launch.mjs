@@ -202,7 +202,7 @@ async function main() {
     logger.log('already-running', { pids: running.pids })
     printLine(
       `ALREADY_RUNNING: DeepSeek Harness 正在运行 (PID ${running.pids.join(', ')})。` +
-        ' 本次将以普通模式启动（只聚焦已有窗口）；如需托盘跟随，请先完全退出 DSH，再从本快捷方式启动。'
+        ' 本次将以普通模式启动（只聚焦已有窗口）；如需托盘随航，请先完全退出 DSH，再从本快捷方式启动。'
     )
     if (!options.noFallback) {
       try {
@@ -280,7 +280,7 @@ async function main() {
   }
   const detail =
     result.errors && result.errors.length > 0 ? result.errors[result.errors.length - 1] : `injection failed at stage ${result.stage}`
-  printLine(`ERROR: 托盘跟随桥接注入失败（阶段: ${result.stage}）。${detail}`)
+  printLine(`ERROR: 托盘随航桥接注入失败（阶段: ${result.stage}）。${detail}`)
   printLine(`       日志: ${path.join(layout.dataDir, 'injector.log')}`)
   if (!options.noFallback) printLine('       已以普通模式重新启动 DeepSeek Harness。')
   return EXIT_ERROR

@@ -9,7 +9,7 @@
  * raises native Electron notifications.
  */
 
-const VERSION = '0.2.0'
+const VERSION = '0.2.2'
 
 /** State contract version owned by the plugin half (docs/DESIGN.md §4). */
 const SCHEMA_VERSION = 2
@@ -71,8 +71,10 @@ const LIMITS = Object.freeze({
   /** Bounds for the settings-driven `options.tray.maxSessionsPerWorkspace`. */
   minSessionsPerWorkspaceOption: 1,
   maxSessionsPerWorkspaceOption: 20,
-  /** Idle sessions listed inside the per-workspace "空闲会话 (N)" submenu. */
-  maxIdleSessionsPerWorkspace: 10,
+  /** Idle sessions listed inside the per-workspace "空闲会话 (N)" submenu.
+   *  Effectively "all of them": the hard cap equals maxSessionsPerWorkspace (100)
+   *  so the menu only truncates pathological workspaces. */
+  maxIdleSessionsPerWorkspace: 100,
   maxUnreadEvents: 200,
   titleChars: 48,
   sessionTitleChars: 40,

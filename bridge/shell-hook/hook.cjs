@@ -24,7 +24,7 @@
 
 const path = require('node:path')
 
-const VERSION = '0.2.0'
+const VERSION = '0.2.2'
 
 let cachedElectron = undefined
 

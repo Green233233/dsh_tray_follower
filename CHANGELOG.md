@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-08
+
+### Added
+
+- **About page in DSH Settings** (`设置 → 关于` / *Settings → About*, section id
+  `tray-follower-about`): author information, repository link, license and the
+  acknowledgement line for @DuoZhao2026.
+- **Tray row deep link**: clicking a conversation row now opens that conversation
+  inside DSH instead of only focusing the window (bridge dispatches
+  `dsh-tray-follower:open-session`; the Client half calls
+  `uiWorkspace.openSession`).
+- Native `Switch` component from `@deepseek-ai/dsh-client-ui-primitives` on the
+  settings page, matching the rest of the application.
+
+### Changed
+
+- Chinese display name is now **托盘随航** (English: *Tray follower*; renamed from
+  托盘跟随).
+- Version and bridge payload are 0.2.2.
+
+### Fixed
+
+- Idle conversations are no longer truncated: the idle list is sorted
+  newest-first and lists every idle conversation (hard cap 100 instead of 10).
+
 ## [0.2.0] - 2026-11-08
 
 Marketplace release: one publishable npm package containing the Host plugin, the

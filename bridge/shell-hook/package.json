@@ -1,6 +1,6 @@
 {
   "name": "dsh-tray-follower-shell-hook",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": true,
   "description": "Electron main-process shell bridge for dsh-tray-follower: tray menu injection + native notifications (injected via the Node inspector, CommonJS).",
   "main": "hook.cjs",

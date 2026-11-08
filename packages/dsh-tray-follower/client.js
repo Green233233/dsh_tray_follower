@@ -1,24 +1,26 @@
 /**
  * dsh-tray-follower — Client half.
  *
- * Adds a "Tray follower" page to DSH Settings that edits the Host Config
- * fields of the `dsh-tray-follower` Loader entry through the shared
- * `ctx.configForms` service, so tray-menu and notification behaviour can be
- * tuned without restarting DSH.
+ * Adds two "settings.section" pages to DSH Settings — the preferences page for
+ * the Host Config of the `dsh-tray-follower` Loader entry, and an About page —
+ * and forwards the bridge's session deep link into the workspace service.
  *
  * The browser artifact is a plain script registered with the Harness module
- * loader: no JSX, no bundler, no import of any Harness Client package. React
- * comes from the loader's module table. Styling uses only `--dsw-alias-*`
+ * loader: no JSX and no bundler. React and the app-native UI primitives come
+ * from the loader's baseline module table. Styling uses only `--dsw-alias-*`
  * theme tokens and inline style objects.
  *
  * Interaction model:
- * - The snapshot is read through a small stable store hook (`useState` +
- *   `useEffect` subscribe), the same pattern as the official
+ * - The config snapshot is read through a small stable store hook (`useState`
+ *   + `useEffect` subscribe), the same pattern as the official
  *   `createSnapshotStore`, so every Host revision re-renders reliably.
  * - A switch flips immediately in local `pending` state, then submits
  *   `form.set(field, value)`. The pending value survives until the snapshot
  *   reflects it; a refusal or rejection reverts the switch and shows the
  *   save-failed notice.
+ * - The switch control itself is the app's own `ui.Switch`, so it matches the
+ *   rest of the Settings UI; a compact button fallback stays if that baseline
+ *   primitive is missing.
  *
  * Host contract (owned by the Host half, fixed field names):
  *   showIdle, maxSessionsPerWorkspace, showHeaderCounts, showFooter,
@@ -30,15 +32,28 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
+    /** App-native primitives; the Switch falls back if this baseline is absent. */
+    let ui
+    try {
+      ui = require('@deepseek-ai/dsh-client-ui-primitives')
+    } catch {
+      ui = undefined
+    }
+    const NativeSwitch = ui !== undefined && ui !== null && typeof ui.Switch === 'function' ? ui.Switch : undefined
 
-    /** Dictionary namespace owned by this plugin. */
+    /** Dictionary namespace owned by these pages. */
     const NS = 'settings.trayFollower'
     /** Host Config entry id: the Loader row and settings namespace. */
     const ENTRY_ID = 'dsh-tray-follower'
-    /** Settings navigation slot this page fills. */
+    /** Settings navigation slot both pages fill. */
     const SLOT = 'settings.section'
-    /** Navigation order; sits after the built-in sections. */
-    const ORDER = 30
+    /** Bridge → Web page deep link event; `event.detail` is the session id. */
+    const SESSION_EVENT = 'dsh-tray-follower:open-session'
+    /** Author, repository and acknowledgement targets shown on the About page. */
+    const AUTHOR_URL = 'https://github.com/Green233233'
+    const REPOSITORY_URL = 'https://github.com/Green233233/dsh_tray_follower'
+    const ACKNOWLEDGEMENT_URL = 'https://github.com/DuoZhao2026'
+    const LICENSE = 'MIT'
     /** Bounds of the one numeric field. */
     const MAX_SESSIONS_MIN = 1
     const MAX_SESSIONS_MAX = 20
@@ -86,7 +101,7 @@ window.__ModuleLoader__.load({
       },
     ]
 
-    /** English copy, complete for every key used by the page. */
+    /** English copy, complete for every key used by both pages. */
     const en = {
       nav: 'Tray follower',
       title: 'Tray follower',
@@ -101,7 +116,7 @@ window.__ModuleLoader__.load({
       showHeaderCounts: 'Show counts in the header',
       showHeaderCountsHint: 'Append running and waiting counts to the conversation header.',
       showFooter: 'Show the footer',
-      showFooterHint: 'Show the DSH tray-follower version line at the bottom of the menu.',
+      showFooterHint: 'Show the Tray follower version line at the bottom of the menu.',
       notifyOnCompleted: 'Notify when a conversation completes',
       notifyOnCompletedHint: 'Raise a system notification when a conversation finishes successfully.',
       notifyOnFailed: 'Notify when a conversation fails',
@@ -116,12 +131,22 @@ window.__ModuleLoader__.load({
       unavailable: 'This plugin is not loaded, so it cannot be configured right now.',
       readOnly: 'This deployment stores settings read-only.',
       saveFailed: 'The settings were not saved. Please try again.',
+      aboutNav: 'About',
+      aboutIntro: 'Version, repository, and acknowledgements.',
+      aboutGroup: 'Plugin details',
+      aboutAuthor: 'Author',
+      aboutRepository: 'Repository',
+      aboutLicense: 'License',
+      ackGroup: 'Acknowledgements',
+      ackPrefix: 'Thanks to ',
+      ackSuffix:
+        ' (https://github.com/DuoZhao2026) for the emotional support. 谢谢小不点er ✧٩(ˊᗜˋ*)و✧',
     }
 
     /** Simplified Chinese copy; same keys as `en`. */
     const zh = {
-      nav: '托盘跟随',
-      title: '托盘跟随',
+      nav: '托盘随航',
+      title: '托盘随航',
       description:
         '控制桌面托盘右键菜单里对话的分组方式，以及 DSH 在对话状态变化时发出系统通知的时机。修改立即生效，无需重启。',
       trayGroup: '托盘右键菜单',
@@ -133,7 +158,7 @@ window.__ModuleLoader__.load({
       showHeaderCounts: '标题显示数量',
       showHeaderCountsHint: '在“对话状态”标题后显示运行中与等待中的数量。',
       showFooter: '显示页脚',
-      showFooterHint: '在菜单底部显示托盘跟随的版本信息。',
+      showFooterHint: '在菜单底部显示托盘随航的版本信息。',
       notifyOnCompleted: '对话完成时通知',
       notifyOnCompletedHint: '对话成功结束时发送系统通知。',
       notifyOnFailed: '对话失败时通知',
@@ -148,6 +173,15 @@ window.__ModuleLoader__.load({
       unavailable: '该插件当前未加载，暂时无法配置。',
       readOnly: '本部署的设置为只读。',
       saveFailed: '设置没有保存成功，请重试。',
+      aboutNav: '关于',
+      aboutIntro: '版本信息、代码仓库与致谢。',
+      aboutGroup: '插件信息',
+      aboutAuthor: '作者',
+      aboutRepository: '仓库',
+      aboutLicense: '许可证',
+      ackGroup: '致谢',
+      ackPrefix: '感谢',
+      ackSuffix: '（https://github.com/DuoZhao2026）提供的情感支持。谢谢小不点er ✧٩(ˊᗜˋ*)و✧',
     }
 
     /** Inline styles; every color is a DSH theme token, never a literal. */
@@ -244,42 +278,6 @@ window.__ModuleLoader__.load({
         gap: '8px',
         minWidth: '120px',
       },
-      switchTrack: {
-        position: 'relative',
-        flex: 'none',
-        width: '40px',
-        height: '22px',
-        padding: 0,
-        boxSizing: 'border-box',
-        borderRadius: '999px',
-        border: '1px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        cursor: 'pointer',
-        transition: 'background-color 150ms ease, border-color 150ms ease',
-      },
-      switchTrackOn: {
-        background: 'var(--dsw-alias-brand-primary)',
-        borderColor: 'transparent',
-      },
-      switchFocus: {
-        outline: '2px solid var(--dsw-alias-brand-primary)',
-        outlineOffset: '2px',
-      },
-      switchKnob: {
-        position: 'absolute',
-        top: '2px',
-        left: '2px',
-        display: 'block',
-        width: '18px',
-        height: '18px',
-        borderRadius: '999px',
-        background: 'var(--dsw-alias-bg-base)',
-        boxSizing: 'border-box',
-        transition: 'transform 150ms ease',
-      },
-      switchKnobOn: {
-        transform: 'translateX(16px)',
-      },
       disabled: {
         opacity: 0.5,
         cursor: 'not-allowed',
@@ -300,6 +298,39 @@ window.__ModuleLoader__.load({
         fontSize: '12px',
         lineHeight: '18px',
         color: 'var(--dsw-alias-label-secondary)',
+      },
+      fallbackSwitch: {
+        minWidth: '64px',
+        boxSizing: 'border-box',
+        padding: '4px 10px',
+        fontSize: '12px',
+        lineHeight: '18px',
+        borderRadius: '999px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-primary)',
+        cursor: 'pointer',
+      },
+      link: {
+        color: 'var(--dsw-alias-brand-primary)',
+        textDecoration: 'underline',
+        textUnderlineOffset: '2px',
+        fontSize: '13px',
+        lineHeight: '20px',
+        wordBreak: 'break-all',
+        textAlign: 'right',
+      },
+      licenseValue: {
+        fontSize: '13px',
+        lineHeight: '20px',
+        color: 'var(--dsw-alias-label-primary)',
+      },
+      acknowledgement: {
+        margin: 0,
+        padding: '14px 0',
+        fontSize: '13.5px',
+        lineHeight: '22px',
+        color: 'var(--dsw-alias-label-primary)',
       },
     }
 
@@ -346,16 +377,6 @@ window.__ModuleLoader__.load({
       return rounded
     }
 
-    /** True when focus arrived from the keyboard, so only then show the ring. */
-    function isKeyboardFocus(event) {
-      try {
-        const target = event !== undefined && event !== null ? event.currentTarget : undefined
-        return typeof target?.matches === 'function' ? target.matches(':focus-visible') : true
-      } catch {
-        return true
-      }
-    }
-
     /**
      * Read the shared Host Config form as a stable React store: one snapshot
      * state, one subscription effect. This is the `useState` + `useEffect`
@@ -394,14 +415,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * A settings switch: a real button with `role="switch"` and
-     * `aria-checked`, matching how the Harness exposes binary preferences.
+     * A switch control: the app-native `ui.Switch` when the baseline module
+     * provides it, otherwise a compact labelled button with the same
+     * `role="switch"` / `aria-checked` semantics.
      */
     function switchControl(options) {
-      const { field, checked, disabled, focusRing, label, onToggle, onFocus, onBlur } = options
-      const track = disabled
-        ? Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null, styles.disabled)
-        : Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null)
+      const { field, checked, disabled, label, onChange } = options
+      if (NativeSwitch !== undefined) {
+        return h(NativeSwitch, {
+          key: field,
+          checked,
+          disabled,
+          label,
+          onChange: (next) => onChange(typeof next === 'boolean' ? next : !checked),
+        })
+      }
       return h(
         'button',
         {
@@ -412,26 +440,16 @@ window.__ModuleLoader__.load({
           'aria-label': label,
           'data-field': field,
           disabled,
-          onClick: () => onToggle(field),
-          onFocus,
-          onBlur,
-          style: focusRing ? Object.assign({}, track, styles.switchFocus) : track,
+          onClick: () => onChange(!checked),
+          style: disabled ? Object.assign({}, styles.fallbackSwitch, styles.disabled) : styles.fallbackSwitch,
         },
-        h(
-          'span',
-          {
-            'aria-hidden': true,
-            style: checked
-              ? Object.assign({}, styles.switchKnob, styles.switchKnobOn)
-              : styles.switchKnob,
-          },
-        ),
+        checked ? '✓' : '—',
       )
     }
 
     /** One labelled preference row with its control on the trailing edge. */
     function toggleRow(options) {
-      const { t, field, checked, disabled, focusRing, onToggle, onFocus, onBlur, divider } = options
+      const { t, field, checked, disabled, onToggle, divider } = options
       return h(
         'div',
         {
@@ -451,11 +469,8 @@ window.__ModuleLoader__.load({
             field,
             checked,
             disabled,
-            focusRing,
             label: t(field),
-            onToggle,
-            onFocus,
-            onBlur,
+            onChange: (next) => onToggle(field, next),
           }),
         ),
       )
@@ -502,8 +517,18 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** External link opening in a new tab without a referrer. */
+    function externalLink(options) {
+      const { href, style, children } = options
+      return h(
+        'a',
+        { href, target: '_blank', rel: 'noreferrer noopener', style: style ?? styles.link },
+        children,
+      )
+    }
+
     /**
-     * The Settings page. It reads the shared Host Config form, optimistically
+     * The settings page. It reads the shared Host Config form, optimistically
      * reflects each switch while the Host round-trip is in flight, and shows
      * the refusal notice when a write comes back rejected.
      * @param {{ t: (key: string) => string, form?: any }} props slot props
@@ -520,7 +545,6 @@ window.__ModuleLoader__.load({
       const snapshot = useFormSnapshot(form)
       const [pending, setPending] = React.useState({})
       const [failed, setFailed] = React.useState(false)
-      const [focusRing, setFocusRing] = React.useState(null)
 
       const status = snapshot !== undefined && snapshot !== null ? snapshot.status : 'loading'
       const writable = snapshot !== undefined && snapshot !== null && snapshot.writable === true
@@ -596,17 +620,9 @@ window.__ModuleLoader__.load({
       }
 
       /** Flip one switch. Disabled rows never reach here. */
-      const onToggle = (field) => {
+      const onToggle = (field, next) => {
         if (disabled) return
-        write(field, !readToggle(values, field))
-      }
-
-      /** Show the keyboard focus ring on the switch that owns focus. */
-      const onFocus = (field) => (event) => {
-        if (isKeyboardFocus(event)) setFocusRing(field)
-      }
-      const onBlur = () => {
-        setFocusRing(null)
+        write(field, typeof next === 'boolean' ? next : !readToggle(values, field))
       }
 
       /** Clamp and persist the session cap when the field loses focus. */
@@ -696,10 +712,7 @@ window.__ModuleLoader__.load({
                 field: row.field,
                 checked: readToggle(values, row.field),
                 disabled,
-                focusRing: focusRing === row.field,
                 onToggle,
-                onFocus: onFocus(row.field),
-                onBlur,
                 divider,
               }),
             )
@@ -718,30 +731,142 @@ window.__ModuleLoader__.load({
       return h('div', { style: styles.page }, children)
     }
 
+    /**
+     * The About page: plugin identity, author, repository, license, and the
+     * acknowledgement line with the contributor's profile linked.
+     * @param {{ t: (key: string) => string }} props slot props
+     * @returns the rendered React element tree
+     */
+    function AboutPage(props) {
+      const t = typeof props.t === 'function' ? props.t : (key) => key
+      const acknowledgement = h(
+        'p',
+        { style: styles.acknowledgement },
+        t('ackPrefix'),
+        externalLink({ href: ACKNOWLEDGEMENT_URL, style: styles.link, children: '@DuoZhao2026' }),
+        t('ackSuffix'),
+      )
+      return h(
+        'div',
+        { style: styles.page },
+        h('h2', { key: 'heading', style: styles.heading }, t('title')),
+        h('p', { key: 'intro', style: styles.intro }, t('aboutIntro')),
+        h(
+          'section',
+          { key: 'details', style: styles.group },
+          h('h3', { style: styles.groupTitle }, t('aboutGroup')),
+          h(
+            'div',
+            { style: styles.card },
+            h(
+              'div',
+              { key: 'author', style: styles.row },
+              h('div', { style: styles.rowCopy }, h('div', { style: styles.rowLabel }, t('aboutAuthor'))),
+              h(
+                'div',
+                { style: styles.controlColumn },
+                externalLink({ href: AUTHOR_URL, children: 'Green233233' }),
+              ),
+            ),
+            h(
+              'div',
+              { key: 'repository', style: Object.assign({}, styles.row, styles.rowDivider) },
+              h('div', { style: styles.rowCopy }, h('div', { style: styles.rowLabel }, t('aboutRepository'))),
+              h(
+                'div',
+                { style: styles.controlColumn },
+                externalLink({ href: REPOSITORY_URL, children: REPOSITORY_URL }),
+              ),
+            ),
+            h(
+              'div',
+              { key: 'license', style: Object.assign({}, styles.row, styles.rowDivider) },
+              h('div', { style: styles.rowCopy }, h('div', { style: styles.rowLabel }, t('aboutLicense'))),
+              h('div', { style: styles.controlColumn }, h('span', { style: styles.licenseValue }, LICENSE)),
+            ),
+          ),
+        ),
+        h(
+          'section',
+          { key: 'acknowledgements', style: styles.group },
+          h('h3', { style: styles.groupTitle }, t('ackGroup')),
+          h('div', { style: styles.card }, acknowledgement),
+        ),
+      )
+    }
+
     return {
-      /** Required client services: slots, dictionaries, and the config forms. */
-      inject: ['slots', 'locale', 'configForms'],
+      /** Required client services: workspace deep links, slots, locale and forms. */
+      inject: ['uiWorkspace', 'slots', 'locale', 'configForms'],
       /**
-       * Register the dictionaries and the Settings page against the live Host
-       * Config form. Everything is owned by `ctx.effect` / `ctx.slots.inject`,
-       * so unloading the plugin removes both.
+       * Register dictionaries, the bridge session deep link, and both Settings
+       * pages. Everything is owned by `ctx.effect` / `ctx.slots.inject`, so
+       * unloading the plugin removes all of it.
        * @param {any} ctx browser plugin context
        */
       apply(ctx) {
         const t = ctx.locale.bind(NS)
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'tray-follower: dictionaries')
+
+        // The desktop bridge cannot navigate the Web page itself; it dispatches
+        // this window event and the page opens the session in the workspace.
+        ctx.effect(() => {
+          const target = typeof window !== 'undefined' ? window : undefined
+          if (target === undefined || target === null || typeof target.addEventListener !== 'function') {
+            return () => {}
+          }
+          const onOpenSession = (event) => {
+            const sessionId = event !== undefined && event !== null ? event.detail : undefined
+            if (typeof sessionId !== 'string' || sessionId === '') return
+            try {
+              target.focus()
+            } catch {
+              // Focusing the window is best effort.
+            }
+            try {
+              ctx.uiWorkspace.openSession(sessionId)
+            } catch (error) {
+              try {
+                console.warn('[dsh-tray-follower] open session failed:', error)
+              } catch {
+                // Diagnostics are best effort.
+              }
+            }
+          }
+          target.addEventListener(SESSION_EVENT, onOpenSession)
+          return () => {
+            try {
+              target.removeEventListener(SESSION_EVENT, onOpenSession)
+            } catch {
+              // The page is going away; nothing to clean up.
+            }
+          }
+        }, 'tray-follower: session deep link')
+
         const form = ctx.configForms.get(ENTRY_ID)
         ctx.slots.inject(SLOT, () =>
           ctx.slots.register(
             {
               name: SLOT,
               id: 'tray-follower',
-              order: ORDER,
+              order: 30,
               label: () => t('nav'),
               locale: NS,
               inject: () => ({ form }),
             },
             SettingsPage,
+          ),
+        )
+        ctx.slots.inject(SLOT, () =>
+          ctx.slots.register(
+            {
+              name: SLOT,
+              id: 'tray-follower-about',
+              order: 31,
+              label: () => t('aboutNav'),
+              locale: NS,
+            },
+            AboutPage,
           ),
         )
       },

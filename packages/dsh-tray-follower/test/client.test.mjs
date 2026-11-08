@@ -1,11 +1,11 @@
 /**
- * Unit tests for the dsh-tray-follower Client half (Settings page).
+ * Unit tests for the dsh-tray-follower Client half.
  *
  * The browser artifact is a plain script for the Harness module loader, so it
  * is executed in a `node:vm` context with a fake `window.__ModuleLoader__`, a
  * minimal fake React with a tiny render loop (hooks persist across renders),
- * and fake Cordis services. No browser, bundler, or React installation is
- * required. The render loop is what proves the optimistic switch behaviour.
+ * a stubbed app-native primitives module, and fake Cordis services. No
+ * browser, bundler, or React installation is required.
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -15,13 +15,28 @@ import { fileURLToPath } from 'node:url'
 
 const CLIENT_PATH = fileURLToPath(new URL('../client.js', import.meta.url))
 const CLIENT_SOURCE = fs.readFileSync(CLIENT_PATH, 'utf8')
+const ZH_LOCALE = JSON.parse(fs.readFileSync(new URL('../locale/zh.json', import.meta.url), 'utf8'))
+const EN_LOCALE = JSON.parse(fs.readFileSync(new URL('../locale/en.json', import.meta.url), 'utf8'))
+const MANIFEST = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
 const MODULE_ID = 'dsh-tray-follower'
+const PRIMITIVES_ID = '@deepseek-ai/dsh-client-ui-primitives'
 const ENTRY_ID = 'dsh-tray-follower'
 const NS = 'settings.trayFollower'
 const SLOT = 'settings.section'
+const SETTINGS_SECTION_ID = 'tray-follower'
+const ABOUT_SECTION_ID = 'tray-follower-about'
+const SESSION_EVENT = 'dsh-tray-follower:open-session'
 
-/** Field names fixed by the Host contract, in page order. */
+const AUTHOR_URL = 'https://github.com/Green233233'
+const REPOSITORY_URL = 'https://github.com/Green233233/dsh_tray_follower'
+const ACKNOWLEDGEMENT_URL = 'https://github.com/DuoZhao2026'
+const ACKNOWLEDGEMENT_ZH =
+  '感谢@DuoZhao2026（https://github.com/DuoZhao2026）提供的情感支持。谢谢小不点er ✧٩(ˊᗜˋ*)و✧'
+const ACKNOWLEDGEMENT_EN =
+  'Thanks to @DuoZhao2026 (https://github.com/DuoZhao2026) for the emotional support. 谢谢小不点er ✧٩(ˊᗜˋ*)و✧'
+
+/** Field names fixed by the Host contract; also the switch render order. */
 const TOGGLE_FIELDS = [
   'showIdle',
   'showHeaderCounts',
@@ -33,17 +48,6 @@ const TOGGLE_FIELDS = [
   'notificationSound',
 ]
 const NUMBER_FIELD = 'maxSessionsPerWorkspace'
-const ALL_FIELDS = [
-  'showIdle',
-  'maxSessionsPerWorkspace',
-  'showHeaderCounts',
-  'showFooter',
-  'notifyOnCompleted',
-  'notifyOnFailed',
-  'notifyOnAttention',
-  'suppressWhenFocused',
-  'notificationSound',
-]
 
 /** Resolve after pending promise callbacks and timers have run. */
 const flush = () => new Promise((resolve) => setImmediate(resolve))
@@ -51,7 +55,8 @@ const flush = () => new Promise((resolve) => setImmediate(resolve))
 /**
  * Fake React with a minimal render loop: `useState` persists per hook index,
  * `useEffect` honors deps, and a setState marks the tree dirty so the next
- * `renderPage` renders again. Only what the Settings page uses is implemented.
+ * `renderPage` renders again. Function components inside the returned tree
+ * (the `ui.Switch` stub) are expanded once, like React would render them.
  */
 function createRuntime() {
   const hooks = []
@@ -86,6 +91,14 @@ function createRuntime() {
     if (previous.length !== next.length) return false
     return previous.every((value, index) => Object.is(value, next[index]))
   }
+  const expand = (node) => {
+    if (node === null || node === undefined) return node
+    if (Array.isArray(node)) return node.map(expand)
+    if (typeof node !== 'object') return node
+    if (typeof node.type === 'function') return expand(node.type(node.props))
+    if (node.props === undefined || node.props === null) return node
+    return { type: node.type, props: Object.assign({}, node.props, { children: expand(node.props.children) }) }
+  }
   return {
     react,
     renderPage(component, getProps) {
@@ -113,29 +126,74 @@ function createRuntime() {
         cycles += 1
         if (cycles > 20) throw new Error('component did not settle')
       } while (state.dirty)
-      return tree
+      return expand(tree)
     },
   }
 }
 
-/** Execute client.js in a sandbox and return the registered module. */
-function loadModule(react) {
-  const loaded = []
+/** Stub for the app-native `ui.Switch`: records props, renders a real switch. */
+function createSwitchStub(react, calls) {
+  return function Switch(props) {
+    calls.push(props)
+    return react.createElement('button', {
+      type: 'button',
+      role: 'switch',
+      'aria-checked': props.checked === true,
+      'aria-label': props.label,
+      disabled: props.disabled === true,
+      onClick: () => {
+        if (typeof props.onChange === 'function') props.onChange(!(props.checked === true))
+      },
+    })
+  }
+}
+
+/** Minimal window with the DOM event API the deep link listener uses. */
+function createWindow(loaded) {
+  const listeners = new Map()
+  const focusCalls = { count: 0 }
   const window = {
     __ModuleLoader__: {
       load(definition) {
         loaded.push(definition)
       },
     },
+    focus() {
+      focusCalls.count += 1
+    },
+    addEventListener(type, listener) {
+      const set = listeners.get(type) ?? new Set()
+      set.add(listener)
+      listeners.set(type, set)
+    },
+    removeEventListener(type, listener) {
+      const set = listeners.get(type)
+      if (set !== undefined) set.delete(listener)
+    },
+    dispatch(type, detail) {
+      for (const listener of Array.from(listeners.get(type) ?? [])) listener({ type, detail })
+    },
+    listenerCount(type) {
+      return (listeners.get(type) ?? new Set()).size
+    },
+    focusCalls,
   }
+  return window
+}
+
+/** Execute client.js in a sandbox and return the registered module. */
+function loadModule(react, primitives) {
+  const loaded = []
+  const window = createWindow(loaded)
   vm.runInContext(CLIENT_SOURCE, vm.createContext({ window, console }), { filename: CLIENT_PATH })
   assert.equal(loaded.length, 1, 'client.js registers exactly one module')
   const definition = loaded[0]
+  const modules = { react, [PRIMITIVES_ID]: primitives }
   const module = definition.factory((id) => {
-    assert.equal(id, 'react', 'the factory only requires React')
-    return react
+    assert.ok(id in modules, `unexpected module request: ${id}`)
+    return modules[id]
   })
-  return { definition, module }
+  return { definition, module, window }
 }
 
 /** Fake locale service with live zh/en dictionaries, mirroring the real one. */
@@ -246,15 +304,22 @@ function createForm(initialValue = {}, accept = () => true) {
   }
 }
 
-/** Fake plugin context for `apply`. */
+/** Fake plugin context for `apply`, including the workspace service. */
 function createContext(locale, slots, form) {
   const effects = []
   const configFormsGets = []
+  const openedSessions = []
   return {
     effects,
     configFormsGets,
+    openedSessions,
     locale,
     slots,
+    uiWorkspace: {
+      openSession(sessionId) {
+        openedSessions.push(sessionId)
+      },
+    },
     configForms: {
       get(entryId) {
         configFormsGets.push(entryId)
@@ -268,10 +333,15 @@ function createContext(locale, slots, form) {
   }
 }
 
-/** Boot the module exactly as the browser loader would. */
+/** Boot the module exactly as the browser loader would, then pick one page. */
 function setup(overrides = {}) {
   const runtime = createRuntime()
-  const { definition, module } = loadModule(runtime.react)
+  const switchCalls = []
+  const primitives =
+    overrides.nativeSwitch === false
+      ? {}
+      : { Switch: createSwitchStub(runtime.react, switchCalls) }
+  const { definition, module, window } = loadModule(runtime.react, primitives)
   const locale = createLocale()
   const slots = createSlots()
   const formHandle = createForm(overrides.value, overrides.accept)
@@ -280,15 +350,20 @@ function setup(overrides = {}) {
   }
   const ctx = createContext(locale, slots, formHandle.form)
   module.apply(ctx)
-  const injected = slots.injected.find((candidate) => candidate.name === SLOT)
-  assert.ok(injected, `apply() injects the ${SLOT} slot`)
-  injected.callback()
-  assert.equal(slots.registrations.length, 1, 'one settings registration')
-  const entry = slots.registrations[0]
+  const injected = slots.injected.filter((candidate) => candidate.name === SLOT)
+  assert.equal(injected.length, 2, 'two settings.section registrations')
+  for (const candidate of injected) candidate.callback()
+  assert.equal(slots.registrations.length, 2, 'two settings pages registered')
+  const entries = new Map(slots.registrations.map((entry) => [entry.options.id, entry]))
+  if (overrides.language !== undefined) locale.use(overrides.language)
+  const pageId = overrides.page ?? SETTINGS_SECTION_ID
+  const entry = entries.get(pageId)
+  assert.ok(entry, `page ${pageId} is registered`)
   const t = locale.bind(NS)
-  const props = Object.assign({ t }, entry.options.inject())
+  const injectedProps = typeof entry.options.inject === 'function' ? entry.options.inject() : {}
+  const props = Object.assign({ t }, injectedProps)
   const render = () => runtime.renderPage(entry.component, () => props)
-  return { definition, module, locale, slots, ctx, formHandle, entry, t, render }
+  return { definition, module, window, locale, slots, ctx, formHandle, entries, entry, t, render, switchCalls }
 }
 
 /** Visit every element object in a rendered tree. */
@@ -312,25 +387,41 @@ function findAll(node, predicate) {
   return found
 }
 
-/** Concatenate the string children of a rendered tree. */
+/** Concatenate every string in a rendered tree, including array children. */
 function textOf(node) {
   const parts = []
-  walk(node, (element) => {
-    const children = element.props?.children
-    if (typeof children === 'string') parts.push(children)
-  })
+  const visit = (current) => {
+    if (current === null || current === undefined) return
+    if (typeof current === 'string') {
+      parts.push(current)
+      return
+    }
+    if (Array.isArray(current)) {
+      for (const child of current) visit(child)
+      return
+    }
+    if (typeof current !== 'object') return
+    visit(current.props?.children)
+  }
+  visit(node)
   return parts.join('')
 }
 
-/** Locate one switch by its config field. */
-function findToggle(tree, field) {
-  return findAll(
-    tree,
-    (element) => element.props?.role === 'switch' && element.props['data-field'] === field,
-  )[0]
+/** All rendered switch buttons, in page order. */
+function switchButtons(tree) {
+  return findAll(tree, (element) => element.props?.role === 'switch')
 }
 
-/** Locate one control (switch or number input) by its config field. */
+/** The switch for one config field, resolved by its fixed render order. */
+function toggleAt(tree, field) {
+  const index = TOGGLE_FIELDS.indexOf(field)
+  assert.ok(index >= 0, `unknown toggle field ${field}`)
+  const button = switchButtons(tree)[index]
+  assert.ok(button, `switch for ${field} rendered`)
+  return button
+}
+
+/** Locate one control (number input) by its config field. */
 function findControl(tree, field) {
   return findAll(tree, (element) => element.props?.['data-field'] === field)[0]
 }
@@ -340,76 +431,92 @@ function findNotice(tree) {
   return findAll(tree, (element) => element.props?.role === 'status')[0]
 }
 
-test('client module uses the package id and requires the settings services', () => {
+test('client module uses the package id and requires the workspace service', () => {
   const runtime = createRuntime()
-  const { definition, module } = loadModule(runtime.react)
+  const { definition, module } = loadModule(runtime.react, {})
   assert.equal(definition.id, MODULE_ID)
   // Values created inside the vm context are from another realm; copy before comparing.
-  assert.deepEqual(Array.from(module.inject), ['slots', 'locale', 'configForms'])
+  assert.deepEqual(Array.from(module.inject), ['uiWorkspace', 'slots', 'locale', 'configForms'])
 })
 
-test('apply registers dictionaries and the settings section against the Host entry', () => {
-  const { module, locale, slots, ctx, entry, formHandle, t } = setup()
+test('apply registers dictionaries and both settings sections', () => {
+  const { locale, slots, ctx, entries, formHandle } = setup()
 
-  // Dictionaries: namespace owned by this page, both baseline locales, same keys.
+  // Dictionaries: one namespace, both baseline locales, same keys.
   assert.equal(locale.registered.length, 1)
   const dictionaries = locale.registered[0]
   assert.equal(dictionaries.ns, NS)
-  assert.ok(dictionaries.locales.zh !== undefined, 'zh dictionary is registered')
-  assert.ok(dictionaries.locales.en !== undefined, 'en dictionary is registered')
   const zhKeys = Object.keys(dictionaries.locales.zh).sort()
   const enKeys = Object.keys(dictionaries.locales.en).sort()
   assert.deepEqual(zhKeys, enKeys, 'zh and en cover the same keys')
-  assert.equal(dictionaries.locales.zh.nav, '托盘跟随')
+  assert.equal(dictionaries.locales.zh.nav, '托盘随航')
+  assert.equal(dictionaries.locales.zh.title, '托盘随航')
   assert.equal(dictionaries.locales.en.nav, 'Tray follower')
+  assert.equal(dictionaries.locales.en.title, 'Tray follower')
+  assert.equal(dictionaries.locales.zh.aboutNav, '关于')
+  assert.equal(dictionaries.locales.en.aboutNav, 'About')
+
+  // The acknowledgement text is composed exactly as requested.
+  assert.equal(dictionaries.locales.zh.ackPrefix + '@DuoZhao2026' + dictionaries.locales.zh.ackSuffix, ACKNOWLEDGEMENT_ZH)
+  assert.equal(dictionaries.locales.en.ackPrefix + '@DuoZhao2026' + dictionaries.locales.en.ackSuffix, ACKNOWLEDGEMENT_EN)
 
   // The shared Config form is resolved once by the Host entry id.
   assert.deepEqual(ctx.configFormsGets, [ENTRY_ID])
 
-  // Slot registration shape consumed by the settings shell.
+  // Two `settings.section` registrations: preferences (30) and About (31).
   assert.deepEqual(
     slots.injected.map((candidate) => candidate.name),
-    [SLOT],
+    [SLOT, SLOT],
   )
-  assert.equal(entry.options.name, SLOT)
-  assert.equal(entry.options.id, 'tray-follower')
-  assert.equal(entry.options.order, 30)
-  assert.equal(entry.options.locale, NS)
-  assert.equal(typeof entry.options.label, 'function')
-  assert.equal(entry.options.label(), '托盘跟随')
+  const settings = entries.get(SETTINGS_SECTION_ID)
+  const about = entries.get(ABOUT_SECTION_ID)
+  assert.ok(settings, 'preferences page registered')
+  assert.ok(about, 'About page registered')
+  assert.equal(settings.options.name, SLOT)
+  assert.equal(settings.options.order, 30)
+  assert.equal(settings.options.locale, NS)
+  assert.equal(settings.options.label(), '托盘随航')
+  assert.equal(about.options.name, SLOT)
+  assert.equal(about.options.order, 31)
+  assert.equal(about.options.locale, NS)
+  assert.equal(about.options.label(), '关于')
   locale.use('en')
-  assert.equal(entry.options.label(), 'Tray follower', 'label follows the active language')
+  assert.equal(settings.options.label(), 'Tray follower', 'settings label follows the active language')
+  assert.equal(about.options.label(), 'About', 'About label follows the active language')
   locale.use('zh')
 
-  // The page receives the very form instance the plugin resolved.
-  assert.equal(entry.options.inject().form, formHandle.form)
-  assert.equal(typeof entry.component, 'function')
-  assert.equal(typeof t('title'), 'string')
+  assert.equal(settings.options.inject().form, formHandle.form)
+  assert.equal(typeof settings.component, 'function')
+  assert.equal(typeof about.component, 'function')
 })
 
-test('page renders the header, both card groups and every fixed field once', () => {
-  const { render, formHandle } = setup()
+test('page renders through the native Switch, both card groups and every field', () => {
+  const { render, formHandle, switchCalls } = setup()
   const page = render()
   const text = textOf(page)
-  assert.ok(text.includes('托盘跟随'), 'page heading')
+  assert.ok(text.includes('托盘随航'), 'page heading')
   assert.ok(text.includes('托盘右键菜单'), 'tray group title')
   assert.ok(text.includes('通知'), 'notification group title')
   assert.ok(text.includes('1–20'), 'range suffix hint')
 
-  const controls = findAll(
-    page,
-    (element) => element.props !== undefined && element.props !== null && element.props['data-field'] !== undefined,
-  )
-  const fields = controls.map((element) => element.props['data-field'])
-  assert.deepEqual(fields.sort(), ALL_FIELDS.slice().sort(), 'every fixed field rendered once')
-
+  // Eight switches, all rendered by the app-native `ui.Switch`.
+  const buttons = switchButtons(page)
+  assert.equal(buttons.length, TOGGLE_FIELDS.length)
   for (const field of TOGGLE_FIELDS) {
-    const toggle = findToggle(page, field)
-    assert.equal(toggle.type, 'button', `${field} is a button`)
-    assert.equal(toggle.props.role, 'switch', `${field} has role=switch`)
-    assert.equal(typeof toggle.props['aria-checked'], 'boolean', `${field} exposes aria-checked`)
-    assert.equal(toggle.props.disabled, false)
+    const button = toggleAt(page, field)
+    assert.equal(button.type, 'button')
+    assert.equal(typeof button.props['aria-checked'], 'boolean')
+    assert.equal(button.props.disabled, false)
   }
+  const latest = switchCalls.slice(-TOGGLE_FIELDS.length)
+  assert.equal(latest.length, TOGGLE_FIELDS.length, 'native Switch rendered for every toggle')
+  latest.forEach((props, index) => {
+    assert.equal(typeof props.checked, 'boolean', `Switch ${index} checked prop`)
+    assert.equal(typeof props.disabled, 'boolean', `Switch ${index} disabled prop`)
+    assert.equal(typeof props.onChange, 'function', `Switch ${index} onChange prop`)
+    assert.equal(props.label.length > 0, true)
+  })
+  assert.equal(new Set(latest.map((props) => props.label)).size, TOGGLE_FIELDS.length, 'one label per toggle')
 
   const number = findControl(page, NUMBER_FIELD)
   assert.equal(number.type, 'input')
@@ -428,48 +535,48 @@ test('page renders the header, both card groups and every fixed field once', () 
   // A Host revision re-renders from the same subscription.
   formHandle.updateValue({ notifyOnCompleted: false })
   const updated = render()
-  assert.equal(findToggle(updated, 'notifyOnCompleted').props['aria-checked'], false)
+  assert.equal(toggleAt(updated, 'notifyOnCompleted').props['aria-checked'], false)
 })
 
 test('a switch flips immediately and keeps the optimistic value until the snapshot lands', async () => {
   const { render, formHandle } = setup()
   let page = render()
-  assert.equal(findToggle(page, 'showIdle').props['aria-checked'], false)
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], false)
 
-  findToggle(page, 'showIdle').props.onClick()
+  toggleAt(page, 'showIdle').props.onClick()
 
   // The Host round-trip is still in flight: form.set was called once...
   assert.deepEqual(formHandle.writes, [['showIdle', true]])
   assert.equal(formHandle.form.getSnapshot().value.showIdle, false, 'snapshot is still old')
   // ...and the very next render already shows the flipped switch.
   page = render()
-  assert.equal(findToggle(page, 'showIdle').props['aria-checked'], true, 'optimistic flip is immediate')
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], true, 'optimistic flip is immediate')
 
   // The accepted value lands in the shared snapshot.
   await flush()
   formHandle.updateValue({ showIdle: true })
   page = render()
-  assert.equal(findToggle(page, 'showIdle').props['aria-checked'], true)
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], true)
   assert.deepEqual(formHandle.writes, [['showIdle', true]], 'no duplicate write')
 
   // Pending state was cleared, so a later external change becomes visible.
   formHandle.updateValue({ showIdle: false })
   page = render()
-  assert.equal(findToggle(page, 'showIdle').props['aria-checked'], false, 'optimistic value was released')
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], false, 'optimistic value was released')
 })
 
 test('a refused write reverts the switch and shows the save-failed notice', async () => {
   const { render, formHandle } = setup({ accept: (field) => field !== 'notifyOnFailed' })
   let page = render()
-  assert.equal(findToggle(page, 'notifyOnFailed').props['aria-checked'], true)
+  assert.equal(toggleAt(page, 'notifyOnFailed').props['aria-checked'], true)
 
-  findToggle(page, 'notifyOnFailed').props.onClick()
+  toggleAt(page, 'notifyOnFailed').props.onClick()
   page = render()
-  assert.equal(findToggle(page, 'notifyOnFailed').props['aria-checked'], false, 'optimistic flip')
+  assert.equal(toggleAt(page, 'notifyOnFailed').props['aria-checked'], false, 'optimistic flip')
 
   await flush()
   page = render()
-  assert.equal(findToggle(page, 'notifyOnFailed').props['aria-checked'], true, 'refusal reverts the switch')
+  assert.equal(toggleAt(page, 'notifyOnFailed').props['aria-checked'], true, 'refusal reverts the switch')
   const notice = findNotice(page)
   assert.ok(notice, 'save-failed notice rendered')
   assert.equal(textOf(notice), '设置没有保存成功，请重试。')
@@ -508,10 +615,10 @@ test('page is disabled with a notice while the form is not ready or not writable
   assert.ok(loadingNotice, 'loading notice rendered')
   assert.equal(textOf(loadingNotice), '正在读取设置…')
   for (const field of TOGGLE_FIELDS) {
-    assert.equal(findToggle(loadingPage, field).props.disabled, true, `${field} disabled while loading`)
+    assert.equal(toggleAt(loadingPage, field).props.disabled, true, `${field} disabled while loading`)
   }
   assert.equal(findControl(loadingPage, NUMBER_FIELD).props.disabled, true)
-  findToggle(loadingPage, 'showIdle').props.onClick()
+  toggleAt(loadingPage, 'showIdle').props.onClick()
   assert.deepEqual(loading.formHandle.writes, [], 'disabled toggles never write')
 
   const readOnly = setup({ snapshot: { status: 'ready', writable: false } })
@@ -520,7 +627,94 @@ test('page is disabled with a notice while the form is not ready or not writable
   assert.ok(readOnlyNotice, 'read-only notice rendered')
   assert.equal(textOf(readOnlyNotice), '本部署的设置为只读。')
   for (const field of TOGGLE_FIELDS) {
-    assert.equal(findToggle(readOnlyPage, field).props.disabled, true, `${field} disabled when read-only`)
+    assert.equal(toggleAt(readOnlyPage, field).props.disabled, true, `${field} disabled when read-only`)
   }
   assert.equal(findControl(readOnlyPage, NUMBER_FIELD).props.disabled, true)
+})
+
+test('the compact fallback switch is used only when ui.Switch is missing', () => {
+  const { render, formHandle, switchCalls } = setup({ nativeSwitch: false })
+  assert.equal(switchCalls.length, 0, 'native Switch is not required for the fallback')
+
+  let page = render()
+  const buttons = switchButtons(page)
+  assert.equal(buttons.length, TOGGLE_FIELDS.length)
+  for (const button of buttons) {
+    assert.equal(button.type, 'button')
+    assert.equal(typeof button.props['aria-checked'], 'boolean')
+    assert.equal(button.props.disabled, false)
+  }
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], false)
+  toggleAt(page, 'showIdle').props.onClick()
+  assert.deepEqual(formHandle.writes, [['showIdle', true]])
+  page = render()
+  assert.equal(toggleAt(page, 'showIdle').props['aria-checked'], true, 'fallback also flips optimistically')
+})
+
+test('the About page renders author, repository, license, and the acknowledgement text', () => {
+  const { entries, render } = setup({ page: ABOUT_SECTION_ID })
+  assert.equal(entries.get(ABOUT_SECTION_ID).options.order, 31)
+  const page = render()
+
+  const text = textOf(page)
+  assert.ok(text.includes('托盘随航'), 'plugin title')
+  assert.ok(text.includes('Green233233'), 'author name')
+  assert.ok(text.includes(REPOSITORY_URL), 'repository url')
+  assert.ok(text.includes('MIT'), 'license')
+  assert.ok(text.includes(ACKNOWLEDGEMENT_ZH), 'exact Chinese acknowledgement line')
+
+  const links = findAll(page, (element) => element.type === 'a')
+  const byHref = new Map(links.map((link) => [link.props.href, link]))
+  assert.ok(byHref.has(AUTHOR_URL), 'author link')
+  assert.ok(byHref.has(REPOSITORY_URL), 'repository link')
+  assert.ok(byHref.has(ACKNOWLEDGEMENT_URL), 'acknowledgement link')
+  for (const href of [AUTHOR_URL, REPOSITORY_URL, ACKNOWLEDGEMENT_URL]) {
+    const link = byHref.get(href)
+    assert.equal(link.props.target, '_blank', `${href} opens externally`)
+    assert.equal(link.props.rel, 'noreferrer noopener', `${href} drops the referrer`)
+  }
+  assert.equal(textOf(byHref.get(AUTHOR_URL)), 'Green233233')
+  assert.equal(textOf(byHref.get(ACKNOWLEDGEMENT_URL)), '@DuoZhao2026', 'link text includes the @')
+
+  const english = setup({ page: ABOUT_SECTION_ID, language: 'en' }).render()
+  assert.ok(textOf(english).includes(ACKNOWLEDGEMENT_EN), 'exact English acknowledgement line')
+})
+
+test('window session event opens the session through uiWorkspace', () => {
+  const { window, ctx } = setup()
+  assert.equal(window.listenerCount(SESSION_EVENT), 1, 'deep link listener installed')
+
+  window.dispatch(SESSION_EVENT, 'session-abc')
+  assert.deepEqual(ctx.openedSessions, ['session-abc'])
+  assert.equal(window.focusCalls.count, 1, 'window focused before opening')
+
+  // Empty or non-string details are ignored.
+  window.dispatch(SESSION_EVENT, '')
+  window.dispatch(SESSION_EVENT, undefined)
+  window.dispatch(SESSION_EVENT, 42)
+  assert.deepEqual(ctx.openedSessions, ['session-abc'])
+
+  // Unloading the plugin removes the listener.
+  const effect = ctx.effects.find((candidate) => candidate.label.includes('session deep link'))
+  assert.ok(effect, 'deep link is an owned effect')
+  effect.dispose()
+  assert.equal(window.listenerCount(SESSION_EVENT), 0)
+  window.dispatch(SESSION_EVENT, 'session-later')
+  assert.deepEqual(ctx.openedSessions, ['session-abc'])
+})
+
+test('manifest and locale resources carry the v0.2.2 rename and dependencies', () => {
+  assert.equal(MANIFEST.version, '0.2.2')
+  assert.equal(MANIFEST.exports['./client'], './client.js')
+  assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-workspace'))
+  assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout'))
+  assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-locale'))
+  assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings'))
+
+  assert.equal(ZH_LOCALE.meta.title, '托盘随航')
+  assert.equal(EN_LOCALE.meta.title, 'Tray follower')
+  assert.ok(ZH_LOCALE.meta.description.includes('桥接'), 'zh description names the desktop bridge')
+  assert.ok(!ZH_LOCALE.meta.description.includes('兜底'), 'zh description drops the stale fallback claim')
+  assert.ok(!/fallback/iu.test(EN_LOCALE.meta.description), 'en description drops the stale fallback claim')
+  assert.ok(EN_LOCALE.meta.description.includes('bridge'), 'en description names the desktop bridge')
 })

@@ -1,6 +1,6 @@
 {
   "name": "dsh-tray-follower",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Per-workspace DSH conversation status in the Windows system tray, native DeepSeek Harness notifications, and a live Tray follower settings page.",
   "keywords": [
     "deepseek",
@@ -45,7 +45,9 @@
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-layout"
       ]
     }
   },

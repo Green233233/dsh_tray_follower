@@ -39,7 +39,7 @@ repository root: the source `packages/dsh-tray-follower/package.json` is
 
 Current expected package shape (verify with the report, not by assumption):
 
-| Metric | Expected at 0.2.0 |
+| Metric | Expected at 0.2.2 |
 | --- | --- |
 | files in tarball | 50 |
 | tarball size | ≈ 92 KiB |
@@ -86,7 +86,7 @@ Both commands must return nothing after the placeholders are replaced.
 The source manifest is owned by the plugin code, not by this packaging
 directory. For a release, coordinate this order:
 
-1. Bump `packages/dsh-tray-follower/package.json` → `"version": "0.2.0"` (or the
+1. Bump `packages/dsh-tray-follower/package.json` → `"version": "0.2.2"` (or the
    release version).
 2. Add the matching `CHANGELOG.md` section at the repository root (date +
    Added/Changed/Fixed).
@@ -99,9 +99,9 @@ The build resolves the version as:
 
 1. `--version <semver>` when passed;
 2. otherwise the source `packages/dsh-tray-follower/package.json` version;
-3. never below the marketplace baseline `0.2.0` — a stale source manifest is
+3. never below the marketplace baseline `0.2.2` — a stale source manifest is
    overridden with a warning (so a forgotten bump cannot publish a package that
-   claims 0.1.0 while containing 0.2.0 features).
+   claims 0.1.0 while containing 0.2.2 features).
 
 The generated package stamps the resolved version into `package.json` and into
 the packaged installer's `const VERSION`.
@@ -133,10 +133,10 @@ node dist/dsh-tray-follower/scripts/uninstall-bridge.mjs
 Expected build output:
 
 ```
-version:     0.2.0
+version:     0.2.2
 client half: present (client.js)
 files:       50 copied
-npm pack:    dsh-tray-follower-0.2.0.tgz (tar 92.4 KiB, unpacked 342.4 KiB, 50 entries)
+npm pack:    dsh-tray-follower-0.2.2.tgz (tar 92.4 KiB, unpacked 342.4 KiB, 50 entries)
 node --check: scripts/install-bridge.mjs OK
 node --check: scripts/uninstall-bridge.mjs OK
 node --check: index.js OK
@@ -218,7 +218,7 @@ Verify the published artifact from a clean directory:
 ```powershell
 npm view dsh-tray-follower version dist-tags --json
 npm view dsh-tray-follower dist.tarball
-npm pack dsh-tray-follower@0.2.0 --json   # downloads and reports size/shasum
+npm pack dsh-tray-follower@0.2.2 --json   # downloads and reports size/shasum
 ```
 
 Compare `size` / `shasum` with `dist/market-package-report.json`
@@ -235,7 +235,7 @@ appear in the listings.
 1. On Windows 10/11 with DSH Desktop 0.2.2-rc.1+:
    open **Settings → Plugins**, search `dsh-tray-follower`, install it.
    Equivalent CLI on a clean profile:
-   `dsh plugin --profile desktop add dsh-tray-follower@0.2.0`.
+   `dsh plugin --profile desktop add dsh-tray-follower@0.2.2`.
 2. Verify the plugin row is present and enabled, and **Settings → Tray
    follower** renders the two option groups with the documented defaults
    (`showIdle=false`, `maxSessionsPerWorkspace=6`, both header/footer `true`,
@@ -283,7 +283,7 @@ machine when the time comes.
    `"notification"` is **not** a valid category id in the published catalog.
 5. Keep:
    - `npm` = `dsh-tray-follower`
-   - `version` = the published version (`0.2.0`)
+   - `version` = the published version (`0.2.2`)
    - `install` = `dsh plugin --profile desktop add dsh-tray-follower`
    - `stars` = `0` (the site's automation refreshes stars/downloads)
    - `added` = the date the entry is merged (`2026-11-08`)
@@ -357,7 +357,7 @@ What this means for a release:
    ```text
    plugin_market list_indexes        → the configured index URL(s)
    plugin_market list_plugins {query: "dsh-tray-follower"}
-     → bundle result: name dsh-tray-follower, version 0.2.0, source npm
+     → bundle result: name dsh-tray-follower, version 0.2.2, source npm
    ```
 
    Or use the DSH **Plugins → Market** page: search `dsh-tray-follower`, confirm
@@ -388,13 +388,13 @@ Order matters: stop new installs, then fix forward.
    users):
 
    ```powershell
-   npm deprecate dsh-tray-follower@0.2.0 "Tray bridge regression; use 0.2.1 or newer"
+   npm deprecate dsh-tray-follower@0.2.2 "Tray bridge regression; use 0.2.1 or newer"
    ```
 
 2. **Unpublish only if the release is unusable and < 72 h old** (npm policy):
 
    ```powershell
-   npm unpublish dsh-tray-follower@0.2.0
+   npm unpublish dsh-tray-follower@0.2.2
    ```
 
    After 72 h, never unpublish: deprecate and publish a fixed patch instead.
@@ -416,7 +416,7 @@ Order matters: stop new installs, then fix forward.
 
 Run after `npm publish` and after the catalog update:
 
-- [ ] `npm view dsh-tray-follower version` → `0.2.0` (or the release version)
+- [ ] `npm view dsh-tray-follower version` → `0.2.2` (or the release version)
 - [ ] `npm view dsh-tray-follower dist.tarball` → registry tarball URL
 - [ ] `npm pack dsh-tray-follower@<version> --json` size/shasum match
       `dist/market-package-report.json`
@@ -432,7 +432,7 @@ Run after `npm publish` and after the catalog update:
       tray menu
 - [ ] awesome-dsh-plugin entry merged and page reachable
 - [ ] Market/search shows the plugin with version and `npm` source
-- [ ] `CHANGELOG.md` entry and git tag (`v0.2.0`) published
+- [ ] `CHANGELOG.md` entry and git tag (`v0.2.2`) published
 - [ ] `dist/` was not committed (it is gitignored) and no tarball is in the repo
 
 ---
@@ -484,6 +484,6 @@ package; see `marketplace/VALIDATION.md` for the checks behind them.
 ## 2026-11-08 release record
 
 - GitHub repository: <https://github.com/Green233233/dsh_tray_follower> (public, MIT, topics: dsh-plugin, deepseek-harness, deepseek, windows, electron, tray, notification, dsh)
-- Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.0> with dsh-tray-follower-0.2.0.tgz (96,325 bytes)
+- Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.2> with dsh-tray-follower-0.2.2.tgz (96,325 bytes)
 - Catalog PR: <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145> (single YAML entry data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml; the gate reports the repository-age rule until the repo is 1 day old, then the check re-runs by itself)
 - npm: not published (no npm credentials on this machine); entry uses the GitHub Release tarball field instead.

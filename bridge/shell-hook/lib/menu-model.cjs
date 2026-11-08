@@ -116,13 +116,24 @@ function buildStatusSection(state, options = {}) {
         else active.push(session)
       }
       active.sort((left, right) => sessionPriority(left.status) - sessionPriority(right.status))
+      // Idle history is listed "all of it": newest first (updatedAt desc, then title)
+      // and capped only by the hard limit (100), not by a small submenu window.
+      idle.sort(compareIdleSessions)
       const visibleActive = active.slice(0, settings.maxSessionsPerWorkspace)
+      const workspaceId = typeof workspace.id === 'string' ? workspace.id : ''
 
       const children = []
       for (const session of visibleActive) {
         const glyph = glyphFor(session.status)
         const sessionTitle = sanitizeLabel(session.title || session.id, LIMITS.sessionTitleChars, strings.unknownSession)
-        children.push({ kind: 'session', label: `${glyph} ${sessionTitle}`, enabled: true, focus: true })
+        children.push({
+          kind: 'session',
+          label: `${glyph} ${sessionTitle}`,
+          enabled: true,
+          focus: true,
+          sessionId: session.id,
+          workspaceId
+        })
       }
       const hiddenActive = active.length - visibleActive.length
       if (hiddenActive > 0) {
@@ -135,7 +146,14 @@ function buildStatusSection(state, options = {}) {
         const visibleIdle = idle.slice(0, LIMITS.maxIdleSessionsPerWorkspace)
         for (const session of visibleIdle) {
           const idleTitle = sanitizeLabel(session.title || session.id, LIMITS.sessionTitleChars, strings.unknownSession)
-          idleRows.push({ kind: 'session', label: `${STATUS_GLYPHS.idle} ${idleTitle}`, enabled: true, focus: true })
+          idleRows.push({
+            kind: 'session',
+            label: `${STATUS_GLYPHS.idle} ${idleTitle}`,
+            enabled: true,
+            focus: true,
+            sessionId: session.id,
+            workspaceId
+          })
         }
         const hiddenIdle = idle.length - visibleIdle.length
         if (hiddenIdle > 0) {
@@ -188,6 +206,17 @@ function glyphFor(status) {
   return STATUS_GLYPHS[status] || STATUS_GLYPHS.idle
 }
 
+/** Idle ordering: newest `updatedAt` first, ties broken by title ascending. */
+function compareIdleSessions(left, right) {
+  const leftUpdated = left && Number.isFinite(left.updatedAt) ? left.updatedAt : 0
+  const rightUpdated = right && Number.isFinite(right.updatedAt) ? right.updatedAt : 0
+  if (leftUpdated !== rightUpdated) return rightUpdated - leftUpdated
+  const leftTitle = left && typeof left.title === 'string' ? left.title : ''
+  const rightTitle = right && typeof right.title === 'string' ? right.title : ''
+  if (leftTitle === rightTitle) return 0
+  return leftTitle < rightTitle ? -1 : 1
+}
+
 function countWorkspaceSessions(sessions) {
   let running = 0
   let pending = 0
@@ -225,14 +254,16 @@ function describeSection(section) {
 
 /**
  * Convert the plain status section into Electron `Menu.buildFromTemplate` items.
- * Session rows are clickable and focus the main window; headers, placeholders and
- * the footer stay disabled; workspace and idle-group rows become submenus.
+ * Session rows are clickable and open that conversation when `options.openSession`
+ * is provided (falling back to focusing the window); headers, placeholders and the
+ * footer stay disabled; workspace and idle-group rows become submenus.
  *
  * @param {object[]} section
- * @param {{focus?: () => void}} [options]
+ * @param {{focus?: () => void, openSession?: (sessionId: string) => void}} [options]
  */
 function toElectronTemplate(section, options = {}) {
   const focus = typeof options.focus === 'function' ? options.focus : () => {}
+  const openSession = typeof options.openSession === 'function' ? options.openSession : null
   const mapItem = (item) => {
     if (!item || typeof item !== 'object') return null
     if (item.kind === 'workspace' || item.kind === 'idle-group') {
@@ -245,7 +276,8 @@ function toElectronTemplate(section, options = {}) {
         enabled: item.enabled !== false,
         click: () => {
           try {
-            focus()
+            if (openSession && typeof item.sessionId === 'string' && item.sessionId) openSession(item.sessionId)
+            else focus()
           } catch (_error) {
             /* never throw from a menu callback */
           }

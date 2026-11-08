@@ -11,7 +11,24 @@ const { describeError } = require('./util.cjs')
  * windows are scored rather than blindly picked by index.
  */
 
-/** Score a window URL; higher means "more likely the main application window". */
+/** Session ids come from the host plugin (`session-<uuid>`); accept any sane token. */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
+
+function isValidSessionId(sessionId) {
+  return typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId)
+}
+
+/** DOM event dispatched in the DSH renderer; the client half listens and navigates. */
+const OPEN_SESSION_EVENT = 'dsh-tray-follower:open-session'
+
+/** Build the renderer script that hands the session id to the DSH client half. */
+function buildOpenSessionScript(sessionId) {
+  return `window.dispatchEvent(new CustomEvent('${OPEN_SESSION_EVENT}', { detail: ${JSON.stringify(sessionId)} }))`
+}
+
+/**
+ * Score a window URL; higher means "more likely the main application window".
+ */
 function scoreWindowUrl(url) {
   if (typeof url !== 'string' || url === '') return 0
   if (url.startsWith('dsh-app://')) return 30
@@ -157,10 +174,65 @@ function createWindowHelper(options = {}) {
     }
   }
 
-  return { state, focus, listWindows, pickPrimaryWindow }
+  /**
+   * Open one conversation: restore/focus the primary window, then dispatch the
+   * `dsh-tray-follower:open-session` DOM event with the session id. The DSH client
+   * half listens for that event and navigates to the conversation.
+   *
+   * Never throws (it runs from a tray menu callback); invalid ids and missing
+   * windows are reported as `{ok:false, reason}` and logged.
+   *
+   * @param {string} sessionId
+   * @returns {{ok: boolean, sessionId?: string, reason?: string, error?: object}}
+   */
+  function openSession(sessionId) {
+    try {
+      if (!isValidSessionId(sessionId)) {
+        log('window-session-open', { ok: false, reason: 'invalid-session-id', sessionId: String(sessionId) })
+        return { ok: false, reason: 'invalid-session-id' }
+      }
+      const focusResult = focus()
+      const picked = pickPrimaryWindow(listWindows(), { webOrigin: getWebOrigin() })
+      if (!picked) {
+        log('window-session-open', { ok: false, reason: 'no-window', sessionId })
+        return { ok: false, reason: 'no-window' }
+      }
+      const webContents = picked.window.webContents
+      if (!webContents || typeof webContents.executeJavaScript !== 'function') {
+        log('window-session-open', { ok: false, reason: 'no-web-contents', sessionId, url: picked.url })
+        return { ok: false, reason: 'no-web-contents' }
+      }
+      const script = buildOpenSessionScript(sessionId)
+      try {
+        const execution = webContents.executeJavaScript(script)
+        if (execution && typeof execution.catch === 'function') {
+          execution.catch((error) => log('window-session-open-failed', { sessionId, error: describeError(error) }))
+        }
+      } catch (error) {
+        log('window-session-open-failed', { sessionId, error: describeError(error) })
+        return { ok: false, reason: 'execute-failed', error: describeError(error) }
+      }
+      log('window-session-open', {
+        ok: true,
+        sessionId,
+        focused: focusResult.ok === true,
+        url: picked.url
+      })
+      return { ok: true, sessionId }
+    } catch (error) {
+      log('window-session-open-failed', { sessionId: String(sessionId), error: describeError(error) })
+      return { ok: false, reason: 'error', error: describeError(error) }
+    }
+  }
+
+  return { state, focus, openSession, listWindows, pickPrimaryWindow }
 }
 
 module.exports = {
+  OPEN_SESSION_EVENT,
+  SESSION_ID_PATTERN,
+  isValidSessionId,
+  buildOpenSessionScript,
   scoreWindowUrl,
   pickPrimaryWindow,
   createWindowHelper
