@@ -133,6 +133,7 @@ node tools/install-bridge.mjs --apply
 | 真实数据 → v0.2.0 菜单渲染（无需重启） | **PASS**；用桥接 `readStateFile()` 读取当前真实 `state.json`（2 工作区 / 6 会话 / 其中 4 个 idle）再走 `buildStatusSection()`：header `对话：2 运行 / 0 待处理`、仅 2 条运行会话行、`idle-group` 0 条、空闲会话行 0 条；`showIdle:false`、`showFooter:false`（用户设置）均生效，输出中无页脚。即真实数据在新逻辑下不会出现空闲对话（该进程重启后生效） |
 | 构建/载荷一致性（sha256） | PASS；dist/dsh-tray-follower 的 client.js/index.js/lib/settings.js 及 bridge 关键文件与源文件 sha256 一致；已安装载荷 pp/shell-hook/{bridge,menu-model,state,notify-policy}.cjs 与仓库一致；pm pack 96,125 bytes / 50 files（仅 repository 占位符警告，属发布前填写项） |
 | 桥接载荷更新 | PASS；`node tools/install-bridge.mjs --apply` 重新安装 v0.2.0 载荷到 `%LOCALAPPDATA%\dsh-tray-follower\app`（shell-hook/injector/launcher + install.json），开始菜单快捷方式保持指向启动器、桌面快捷方式 already |
+| 关于 tab（用户反馈调整） | PASS；用户首次反馈“关于应是托盘随航页内子菜单”，Client 改为页内「设置 / 关于」tab（只保留一个 settings.section 注册），热重载后用户确认“左侧只有托盘随航，页内有设置/关于 tab”，关于页作者/仓库/致谢内容正常 |
 | 待重启确认 | **未验证（需用户重启 DSH）**：当前运行的桥接仍是 v0.1.0 进程内代码，托盘菜单要等 DSH 从快捷方式重启后才会应用 v0.2.0 的“空闲对话默认隐藏 + 设置即时生效”；`bridge.log` 目前记录 `schemaVersion 2 is not 1; parsed best-effort`（旧桥接对 v2 的兼容告警），重启后应消失 |
 
 ### 6.3 上架物料
