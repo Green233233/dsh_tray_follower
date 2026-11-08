@@ -5,7 +5,7 @@
 本仓库同时包含两类产物：
 
 1. **DSH 插件包**（`packages/dsh-tray-follower/`）：符合 DSH bundle 规范，通过 `plugin_manager` 的 `install_bundle` 安装；Host 半运行在 DSH Host 进程，Client 半运行在 Web GUI。
-2. **DSH Desktop 桥接层**（`bridge/shell-hook/`）：以 CommonJS 预加载钩子的形式注入 DSH Desktop 的 Electron 主进程（通过 `NODE_OPTIONS=--require ...`），用于扩展托盘菜单与系统通知。它不属于 DSH 插件规范的一部分，属可选增强，安装/卸载必须可逆。
+2. **DSH Desktop 桥接层**（`bridge/shell-hook/`）：以 Node Inspector CDP 注入的方式加载到 DSH Desktop 的 Electron 主进程（启动器给 DSH 附加仅回环的 `--inspect`，注入完成后关闭端口；打包 Electron 不支持 `NODE_OPTIONS=--require`），用于扩展托盘菜单与系统通知。它不属于 DSH 插件规范的一部分，属可选增强，安装/卸载必须可逆。
 
 ## 硬性约束
 
@@ -20,6 +20,7 @@
 - 分支：`main` 为稳定；功能分支 `feat/<slug>`。
 - 提交信息：Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:` / `test:`）。
 - 提交前：`node tools/check.mjs`（语法检查 + 单元测试 + 契约校验）。
+- 上架发布物用 `node scripts/build-market-package.mjs` 构建到 `dist/`（gitignored）；发布步骤见 `marketplace/PUBLISHING.md`。
 - 调研提取的第三方代码放到 `docs/recon/extracted/`，已被 `.gitignore` 排除，禁止提交。
 - 改动结论（尤其是对 DSH 内部行为的假设）必须写进 `docs/recon/NOTES.md`，附文件路径/行号证据。
 

@@ -1,14 +1,20 @@
 'use strict'
 
-const { LIMITS } = require('./constants.cjs')
+const { LIMITS, DEFAULT_NOTIFICATION_OPTIONS } = require('./constants.cjs')
 
 /**
  * Notification policy for unread conversation events.
  *
- * Requirements (docs/DESIGN.md + task contract):
+ * Requirements (docs/DESIGN.md + task contract v2):
  *  - only events that have never been notified/observed are considered;
- *  - events observed while the app is focused are marked seen but not notified
- *    (the user is already looking at DSH);
+ *  - contract-v2 `options.notifications` drives behavior:
+ *      · `notifyOnCompleted` / `notifyOnFailed` / `notifyOnAttention` filter event
+ *        kinds; filtered events are marked seen (a settings toggle must not replay
+ *        old history);
+ *      · `suppressWhenFocused` (default true) suppresses notifications while the
+ *        DSH window is focused; when false the user gets notified even then;
+ *      · `notificationSound` maps to `silent: !notificationSound` on the
+ *        Electron notification;
  *  - multiple events observed in the same poll are coalesced into one summary
  *    notification ("N 个对话需要关注");
  *  - rate limit: at most one notification per `minIntervalMs`; events that arrive
@@ -39,6 +45,36 @@ function capSeenIds(ids, cap = LIMITS.seenCap) {
 }
 
 /**
+ * Merge contract-v2 notification settings over the strict defaults.
+ * Missing/invalid values fall back to defaults (v1 state files have no options).
+ */
+function resolveNotificationSettings(raw) {
+  const defaults = DEFAULT_NOTIFICATION_OPTIONS
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const read = (key) => (typeof source[key] === 'boolean' ? source[key] : defaults[key])
+  return {
+    notifyOnCompleted: read('notifyOnCompleted'),
+    notifyOnFailed: read('notifyOnFailed'),
+    notifyOnAttention: read('notifyOnAttention'),
+    suppressWhenFocused: read('suppressWhenFocused'),
+    notificationSound: read('notificationSound')
+  }
+}
+
+const KIND_TO_SETTING = Object.freeze({
+  completed: 'notifyOnCompleted',
+  failed: 'notifyOnFailed',
+  'needs-attention': 'notifyOnAttention'
+})
+
+/** True when the event kind is enabled by the notification settings. */
+function isKindAllowed(kind, settings) {
+  const key = KIND_TO_SETTING[kind]
+  if (!key) return true
+  return settings[key] !== false
+}
+
+/**
  * @param {object[]} events normalized unread events
  * @param {object} context
  * @param {number} [context.now]
@@ -47,13 +83,18 @@ function capSeenIds(ids, cap = LIMITS.seenCap) {
  * @param {string[]} [context.seenIds]
  * @param {number} [context.lastNotifyAt]
  * @param {boolean} [context.baseline] first-run silent baseline
- * @param {object} [context.config]
+ * @param {object} [context.options] contract-v2 `options.notifications`
+ * @param {object} [context.config] policy tuning (rate limit/coalescing/replay window)
  * @returns {{
- *   notifications: {kind: string, title: string, body: string, eventIds: string[]}[],
+ *   notifications: {kind: string, title: string, body: string, eventIds: string[], silent: boolean}[],
  *   seenIdsToAdd: string[],
+ *   expiredIds: string[],
+ *   filteredIds: string[],
  *   deferredIds: string[],
  *   baselineApplied: boolean,
  *   suppressed: boolean,
+ *   silent: boolean,
+ *   settings: object,
  *   lastNotifyAt: number,
  *   now: number,
  *   candidates: number
@@ -62,7 +103,6 @@ function capSeenIds(ids, cap = LIMITS.seenCap) {
 function planNotifications(events, context = {}) {
   const config = Object.assign(
     {
-      suppressWhenFocused: true,
       notifyWhileFocused: false,
       minIntervalMs: LIMITS.notifyMinIntervalMs,
       maxBodyLines: LIMITS.notifyMaxBodyLines,
@@ -71,10 +111,13 @@ function planNotifications(events, context = {}) {
     },
     context.config && typeof context.config === 'object' ? context.config : {}
   )
+  const settings = resolveNotificationSettings(context.options)
+  const silent = settings.notificationSound !== true
   const now = Number.isFinite(context.now) ? context.now : Date.now()
   const lastNotifyAt = Number.isFinite(context.lastNotifyAt) ? context.lastNotifyAt : 0
   const seen = new Set(Array.isArray(context.seenIds) ? context.seenIds : [])
-  const candidates = []
+
+  const live = []
   const expiredIds = []
   if (Array.isArray(events)) {
     for (const event of events) {
@@ -84,7 +127,7 @@ function planNotifications(events, context = {}) {
         expiredIds.push(event.id)
         continue
       }
-      candidates.push(event)
+      live.push(event)
     }
   }
 
@@ -92,24 +135,40 @@ function planNotifications(events, context = {}) {
     notifications: [],
     seenIdsToAdd: expiredIds.slice(),
     expiredIds,
+    filteredIds: [],
     deferredIds: [],
     baselineApplied: false,
     suppressed: false,
+    silent,
+    settings,
     lastNotifyAt,
     now,
-    candidates: candidates.length
+    candidates: 0
   }
-  if (candidates.length === 0) return result
+  if (live.length === 0) return result
 
   if (context.baseline === true) {
+    // First-ever run: baseline everything silently (including disabled kinds).
     result.baselineApplied = true
-    result.seenIdsToAdd.push(...candidates.map((event) => event.id))
+    result.seenIdsToAdd.push(...live.map((event) => event.id))
     return result
   }
 
+  // Settings-driven kind filters. Disabled kinds are consumed silently so a later
+  // settings change cannot replay old history.
+  const candidates = []
+  for (const event of live) {
+    if (isKindAllowed(event.kind, settings)) candidates.push(event)
+    else result.filteredIds.push(event.id)
+  }
+  result.seenIdsToAdd.push(...result.filteredIds)
+  result.candidates = candidates.length
+  if (candidates.length === 0) return result
+
   const focused = context.focused === true
-  const notifyWhileFocused = config.notifyWhileFocused === true
-  if (config.suppressWhenFocused !== false && focused && !notifyWhileFocused) {
+  const suppressWhenFocused =
+    config.suppressWhenFocused !== undefined ? config.suppressWhenFocused !== false : settings.suppressWhenFocused !== false
+  if (suppressWhenFocused && focused && config.notifyWhileFocused !== true) {
     result.suppressed = true
     result.seenIdsToAdd.push(...candidates.map((event) => event.id))
     return result
@@ -126,7 +185,8 @@ function planNotifications(events, context = {}) {
       kind: 'single',
       title: event.title || 'DSH 对话需要关注',
       body: event.body || '',
-      eventIds: [event.id]
+      eventIds: [event.id],
+      silent
     })
   } else {
     const lines = candidates.slice(0, config.maxBodyLines).map((event) => `• ${event.body || event.title || event.id}`)
@@ -135,7 +195,8 @@ function planNotifications(events, context = {}) {
       kind: 'summary',
       title: `${candidates.length} 个对话需要关注`,
       body: lines.join('\n'),
-      eventIds: candidates.map((event) => event.id)
+      eventIds: candidates.map((event) => event.id),
+      silent
     })
   }
   result.seenIdsToAdd.push(...candidates.map((event) => event.id))
@@ -145,5 +206,7 @@ function planNotifications(events, context = {}) {
 
 module.exports = {
   capSeenIds,
+  resolveNotificationSettings,
+  isKindAllowed,
   planNotifications
 }

@@ -5,6 +5,8 @@ const path = require('node:path')
 
 const {
   SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
+  DEFAULT_OPTIONS,
   STATUS_GLYPHS,
   PENDING_STATUSES,
   DEFAULT_STATUS,
@@ -24,6 +26,123 @@ function normalizeStatus(value, warnings, where) {
   if (typeof value === 'string' && Object.prototype.hasOwnProperty.call(STATUS_GLYPHS, value)) return value
   if (value !== undefined) pushWarning(warnings, `${where}: unknown status ${JSON.stringify(value)} -> ${DEFAULT_STATUS}`)
   return DEFAULT_STATUS
+}
+
+function normalizeBooleanOption(value, fallback, warnings, where) {
+  if (typeof value === 'boolean') return value
+  if (value !== undefined) {
+    pushWarning(warnings, `${where}: expected boolean, got ${JSON.stringify(value)} -> ${String(fallback)}`)
+  }
+  return fallback
+}
+
+/**
+ * Normalize the contract-v2 settings block.
+ *
+ * Missing / invalid values always fall back to the strict defaults so an older
+ * v1 state file (no `options` at all) behaves exactly like "settings never
+ * touched": idle hidden, 6 rows, header counts on, footer on, all notifications on,
+ * focused suppression on, sound on.
+ *
+ * @returns {{tray: object, notifications: object}}
+ */
+function normalizeOptions(raw, warnings, schemaVersion) {
+  const defaults = DEFAULT_OPTIONS
+  const options = {
+    tray: { ...defaults.tray },
+    notifications: { ...defaults.notifications }
+  }
+  if (!isPlainObject(raw)) {
+    if (raw !== undefined || schemaVersion >= 2) {
+      pushWarning(warnings, `options missing or invalid for schemaVersion ${String(schemaVersion)}; using defaults`)
+    }
+    return options
+  }
+  const traySource = isPlainObject(raw.tray) ? raw.tray : null
+  const notificationSource = isPlainObject(raw.notifications) ? raw.notifications : null
+  if (!traySource && raw.tray !== undefined) pushWarning(warnings, 'options.tray is not an object; using defaults')
+  if (!notificationSource && raw.notifications !== undefined) {
+    pushWarning(warnings, 'options.notifications is not an object; using defaults')
+  }
+
+  if (traySource) {
+    options.tray.showIdle = normalizeBooleanOption(
+      traySource.showIdle,
+      defaults.tray.showIdle,
+      warnings,
+      'options.tray.showIdle'
+    )
+    options.tray.showHeaderCounts = normalizeBooleanOption(
+      traySource.showHeaderCounts,
+      defaults.tray.showHeaderCounts,
+      warnings,
+      'options.tray.showHeaderCounts'
+    )
+    options.tray.showFooter = normalizeBooleanOption(
+      traySource.showFooter,
+      defaults.tray.showFooter,
+      warnings,
+      'options.tray.showFooter'
+    )
+    const rawMax = traySource.maxSessionsPerWorkspace
+    if (rawMax !== undefined) {
+      const parsed = finiteNumber(rawMax, Number.NaN)
+      if (!Number.isFinite(parsed)) {
+        pushWarning(
+          warnings,
+          `options.tray.maxSessionsPerWorkspace: expected number, got ${JSON.stringify(rawMax)} -> ${defaults.tray.maxSessionsPerWorkspace}`
+        )
+      } else {
+        const rounded = Math.round(parsed)
+        const clamped = Math.min(
+          LIMITS.maxSessionsPerWorkspaceOption,
+          Math.max(LIMITS.minSessionsPerWorkspaceOption, rounded)
+        )
+        if (clamped !== rounded) {
+          pushWarning(
+            warnings,
+            `options.tray.maxSessionsPerWorkspace: clamped ${String(rounded)} -> ${String(clamped)}`
+          )
+        }
+        options.tray.maxSessionsPerWorkspace = clamped
+      }
+    }
+  }
+
+  if (notificationSource) {
+    options.notifications.notifyOnCompleted = normalizeBooleanOption(
+      notificationSource.notifyOnCompleted,
+      defaults.notifications.notifyOnCompleted,
+      warnings,
+      'options.notifications.notifyOnCompleted'
+    )
+    options.notifications.notifyOnFailed = normalizeBooleanOption(
+      notificationSource.notifyOnFailed,
+      defaults.notifications.notifyOnFailed,
+      warnings,
+      'options.notifications.notifyOnFailed'
+    )
+    options.notifications.notifyOnAttention = normalizeBooleanOption(
+      notificationSource.notifyOnAttention,
+      defaults.notifications.notifyOnAttention,
+      warnings,
+      'options.notifications.notifyOnAttention'
+    )
+    options.notifications.suppressWhenFocused = normalizeBooleanOption(
+      notificationSource.suppressWhenFocused,
+      defaults.notifications.suppressWhenFocused,
+      warnings,
+      'options.notifications.suppressWhenFocused'
+    )
+    options.notifications.notificationSound = normalizeBooleanOption(
+      notificationSource.notificationSound,
+      defaults.notifications.notificationSound,
+      warnings,
+      'options.notifications.notificationSound'
+    )
+  }
+
+  return options
 }
 
 function normalizeSession(raw, workspaceIndex, sessionIndex, warnings) {
@@ -116,10 +235,21 @@ function normalizeState(raw) {
     if (!isPlainObject(raw)) {
       return { ok: false, error: 'state document is not a JSON object', warnings: ['state document is not a JSON object'] }
     }
-    const schemaVersion = nonNegativeInt(raw.schemaVersion, SCHEMA_VERSION)
-    if (schemaVersion !== SCHEMA_VERSION) {
-      pushWarning(warnings, `schemaVersion ${String(raw.schemaVersion)} is not ${SCHEMA_VERSION}; parsed best-effort`)
+    const rawSchemaVersion = raw.schemaVersion
+    let schemaVersion = SCHEMA_VERSION
+    if (typeof rawSchemaVersion === 'number' && Number.isFinite(rawSchemaVersion)) {
+      schemaVersion = Math.floor(rawSchemaVersion)
+      if (!SUPPORTED_SCHEMA_VERSIONS.includes(schemaVersion)) {
+        pushWarning(
+          warnings,
+          `schemaVersion ${String(schemaVersion)} is not one of ${SUPPORTED_SCHEMA_VERSIONS.join('/')}; parsed best-effort with v${SCHEMA_VERSION} defaults`
+        )
+      }
+    } else if (rawSchemaVersion !== undefined) {
+      pushWarning(warnings, `schemaVersion ${JSON.stringify(rawSchemaVersion)} is not a number; parsed best-effort`)
     }
+
+    const options = normalizeOptions(raw.options, warnings, schemaVersion)
 
     const workspaceSource = Array.isArray(raw.workspaces) ? raw.workspaces : []
     if (!Array.isArray(raw.workspaces)) pushWarning(warnings, 'workspaces is not an array')
@@ -170,6 +300,7 @@ function normalizeState(raw) {
         updatedAt: finiteNumber(raw.updatedAt, 0),
         hostPid: nonNegativeInt(raw.hostPid, 0),
         webOrigin: cleanText(raw.webOrigin, 200),
+        options,
         workspaces,
         unreadEvents,
         stats
@@ -224,6 +355,7 @@ function readStateFile(dataDir, fileName = STATE_FILE_NAME) {
 
 module.exports = {
   STATE_FILE_NAME,
+  normalizeOptions,
   normalizeState,
   parseStateText,
   readStateFile

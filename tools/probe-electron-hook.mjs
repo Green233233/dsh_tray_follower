@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 import { INSPECT_DEFAULT_PORT, defaultDshExe, sanitizeDshEnv } from '../bridge/injector/lib/env.mjs'
@@ -49,6 +50,11 @@ const EXIT_USAGE = 2
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.dirname(here)
+const require = createRequire(import.meta.url)
+const shellHookLib = (name) => require(path.join(repoRoot, 'bridge', 'shell-hook', 'lib', name))
+const constantsLib = shellHookLib('constants.cjs')
+const stateLib = shellHookLib('state.cjs')
+const menuModelLib = shellHookLib('menu-model.cjs')
 
 const EXPECTED_HEADER = '对话：1 运行 / 1 待处理'
 const EXPECTED_LABELS = [
@@ -57,10 +63,17 @@ const EXPECTED_LABELS = [
   '▶ 运行中的对话',
   '✓ 已完成的对话',
   '📁 Probe Workspace B  运行 0 · 待处理 0',
-  '空闲会话 (1)',
-  '○ 空闲对话',
-  'dsh-tray-follower v0.1.0'
+  '（无对话）',
+  'dsh-tray-follower v0.2.0'
 ]
+/** Contract-v2 defaults: idle rows and the idle submenu must be absent. */
+const FORBIDDEN_IDLE_PREFIXES = ['空闲会话', '○ ']
+const EXPECTED_TRAY_OPTIONS = Object.freeze({
+  showIdle: false,
+  maxSessionsPerWorkspace: 6,
+  showHeaderCounts: true,
+  showFooter: true
+})
 
 function parseArgs(argv) {
   const options = {
@@ -213,10 +226,20 @@ function menuEvidenceReady(snapshot) {
 function buildFixtureState() {
   const now = Date.now()
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     updatedAt: now,
     hostPid: 0,
     webOrigin: 'http://127.0.0.1:1',
+    options: {
+      tray: { showIdle: false, maxSessionsPerWorkspace: 6, showHeaderCounts: true, showFooter: true },
+      notifications: {
+        notifyOnCompleted: true,
+        notifyOnFailed: true,
+        notifyOnAttention: true,
+        suppressWhenFocused: true,
+        notificationSound: true
+      }
+    },
     workspaces: [
       {
         id: 'ws_probe_a',
@@ -225,14 +248,16 @@ function buildFixtureState() {
         sessions: [
           { id: 's_probe_running', title: '运行中的对话', status: 'running', detail: '探针', updatedAt: now, startedAt: now },
           { id: 's_probe_waiting', title: '等待批准的对话', status: 'waiting-approval', detail: '', updatedAt: now },
-          { id: 's_probe_done', title: '已完成的对话', status: 'completed', detail: '', updatedAt: now }
+          { id: 's_probe_done', title: '已完成的对话', status: 'completed', detail: '', updatedAt: now },
+          // Idle history must stay hidden under the contract-v2 defaults.
+          { id: 's_probe_idle_hidden', title: '空闲历史对话（应隐藏）', status: 'idle', detail: '', updatedAt: now }
         ]
       },
       {
         id: 'ws_probe_b',
         title: 'Probe Workspace B',
         path: 'C:\\probe\\workspace-b',
-        sessions: [{ id: 's_probe_idle', title: '空闲对话', status: 'idle', detail: '', updatedAt: now }]
+        sessions: [{ id: 's_probe_idle', title: '空闲对话（应隐藏）', status: 'idle', detail: '', updatedAt: now }]
       }
     ],
     unreadEvents: [
@@ -247,6 +272,25 @@ function buildFixtureState() {
       }
     ]
   }
+}
+
+/**
+ * Render the fixture through the same state/menu-model code the hook uses and
+ * return the exact labels the isolated E2E run must observe. Used by the dry run
+ * so `EXPECTED_HEADER` / `EXPECTED_LABELS` cannot silently drift from the fixture
+ * or from the v0.2.0 menu behavior.
+ */
+function previewFixtureMenu() {
+  const normalized = stateLib.normalizeState(buildFixtureState())
+  if (!normalized.ok) return { ok: false, error: normalized.error, labels: [], header: '', idleLabels: [] }
+  const section = menuModelLib.buildStatusSection(normalized.state, {
+    version: constantsLib.VERSION,
+    locale: 'zh-CN'
+  })
+  const labels = flattenLabels(section)
+  const header = section.length > 0 ? section[0].label : ''
+  const idleLabels = labels.filter((label) => FORBIDDEN_IDLE_PREFIXES.some((prefix) => label.startsWith(prefix)))
+  return { ok: true, labels, header, idleLabels, state: normalized.state }
 }
 
 async function waitForEvidence(logFile, options = {}) {
@@ -313,6 +357,7 @@ async function main() {
     printLine(line)
   }
 
+  const fixturePreview = previewFixtureMenu()
   const plan = {
     exePath,
     hookPath,
@@ -330,10 +375,15 @@ async function main() {
       DSH_TRAY_FOLLOWER_KEEP_INSPECTOR: '1',
       DSH_TRAY_FOLLOWER_TEST_SHOW_NOTIFICATION: options.showNotification ? '1' : '0'
     },
+    /** Exact menu labels rendered from the v2 fixture by the hook's own model. */
+    fixtureMenuPreview: fixturePreview.ok
+      ? { header: fixturePreview.header, labels: fixturePreview.labels, idleLabels: fixturePreview.idleLabels }
+      : { error: fixturePreview.error },
     expectedEvidence: [
       'injectIntoTarget ok with diagnostics.patched=true',
       'tray adopted (diagnostics.trayAdopted=true)',
       `menu-rebuilt diag contains header "${EXPECTED_HEADER}" plus workspace/session rows`,
+      'contract-v2 tray defaults visible: no idle rows / no 空闲会话 submenu (showIdle=false)',
       'notification-shown diag (self-test notification, kind "test")',
       `bridge.log: ${bridgeLogFile}`
     ]
@@ -341,6 +391,24 @@ async function main() {
   printLine('== dsh-tray-follower isolated E2E probe ==')
   printLine(JSON.stringify(plan, null, 2))
   printLine('')
+
+  // Self-check the expected labels against the fixture + menu model (no GUI).
+  const fixtureMenuOk =
+    fixturePreview.ok &&
+    fixturePreview.header === EXPECTED_HEADER &&
+    EXPECTED_LABELS.every((label) => fixturePreview.labels.includes(label)) &&
+    fixturePreview.idleLabels.length === 0
+  if (fixtureMenuOk) {
+    record(
+      'PASS',
+      `fixture menu preview matches expectations (header "${fixturePreview.header}"; labels: ${fixturePreview.labels.join(' | ')})`
+    )
+  } else {
+    record(
+      'FAIL',
+      `fixture/menu-model preview does not match EXPECTED_*; preview=${JSON.stringify(fixturePreview.labels)} idle=${JSON.stringify(fixturePreview.idleLabels)}`
+    )
+  }
 
   if (!fs.existsSync(exePath)) {
     record('FAIL', `DSH executable not found: ${exePath}`)
@@ -362,7 +430,17 @@ async function main() {
     }
     printLine('')
     printLine('Cleanup: dry run leaves nothing behind.')
-    return EXIT_OK
+    return fixtureMenuOk ? EXIT_OK : EXIT_FAIL
+  }
+
+  if (!fixtureMenuOk) {
+    record('FAIL', 'refusing to run the E2E probe: fixture/preview self-check failed')
+    try {
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    } catch (_error) {
+      /* ignore */
+    }
+    return EXIT_FAIL
   }
 
   const running = listDshBrowserPids({ exeName: path.basename(exePath) })
@@ -449,6 +527,17 @@ async function main() {
     const trayDiag = findLastDiag(snapshot.diags, 'tray-adopted')
     const trayOk = Boolean(trayDiag) || Boolean(snapshot.diags.find((diag) => diag.event === 'tray-captured'))
 
+    // Contract-v2 defaults: idle conversations hidden (no idle rows/submenu) and the
+    // published tray options applied by the hook diagnostics.
+    const menuSection = menuDiag && menuDiag.data && Array.isArray(menuDiag.data.section) ? menuDiag.data.section : []
+    const sectionHasIdleGroup = menuSection.some((item) => item && item.kind === 'idle-group')
+    const idleLabels = menuLabels.filter((label) => FORBIDDEN_IDLE_PREFIXES.some((prefix) => label.startsWith(prefix)))
+    const idleHiddenOk = menuOk && !sectionHasIdleGroup && idleLabels.length === 0
+    const trayOptions = diagnostics.options && typeof diagnostics.options.tray === 'object' ? diagnostics.options.tray : {}
+    const optionsOk = Object.keys(EXPECTED_TRAY_OPTIONS).every(
+      (key) => trayOptions[key] === EXPECTED_TRAY_OPTIONS[key]
+    )
+
     if (evidenceWait.ok) record('PASS', `bridge.log evidence observed after ${String(evidenceWait.elapsedMs)} ms`)
     else record('FAIL', `bridge.log evidence incomplete after ${String(evidenceWait.elapsedMs)} ms`)
 
@@ -460,6 +549,24 @@ async function main() {
 
     if (trayOk) record('PASS', 'tray capture/adoption evidenced')
     else record('FAIL', 'no tray capture/adoption evidence')
+
+    if (optionsOk) {
+      record(
+        'PASS',
+        `contract-v2 tray defaults applied (showIdle=${String(trayOptions.showIdle)}, maxSessionsPerWorkspace=${String(trayOptions.maxSessionsPerWorkspace)}, showHeaderCounts=${String(trayOptions.showHeaderCounts)}, showFooter=${String(trayOptions.showFooter)})`
+      )
+    } else {
+      record('FAIL', `contract-v2 tray options mismatch: ${JSON.stringify(trayOptions)} expected ${JSON.stringify(EXPECTED_TRAY_OPTIONS)}`)
+    }
+
+    if (idleHiddenOk) {
+      record('PASS', 'idle conversations hidden by default (no idle rows, no 空闲会话 submenu)')
+    } else {
+      record(
+        'FAIL',
+        `idle conversations leaked into the default menu: idleGroup=${String(sectionHasIdleGroup)}, idleLabels=${JSON.stringify(idleLabels)}`
+      )
+    }
 
     if (notificationApiOk) {
       record(
@@ -487,7 +594,7 @@ async function main() {
     record('INFO', `diag events seen: ${diagEvents || '(none)'}`)
     record('INFO', `hook diagnostics: ${JSON.stringify(diagnostics)}`)
 
-    const pass = menuOk && originalOk && trayOk && notificationOk && notificationApiOk
+    const pass = menuOk && originalOk && trayOk && notificationOk && notificationApiOk && optionsOk && idleHiddenOk
     if (pass) {
       record('PASS', 'isolated E2E probe completed successfully')
       exitCode = EXIT_OK

@@ -357,6 +357,63 @@ test('state: oversized arrays are truncated and warned', () => {
   assert.ok(read.warnings.some((warning) => warning.includes('truncated')))
 })
 
+test('state: contract v1 files keep working with v2 option defaults and no warnings', () => {
+  const read = stateModule.normalizeState(sampleState())
+  assert.equal(read.ok, true)
+  assert.equal(read.state.schemaVersion, 1)
+  assert.deepEqual(read.state.options, {
+    tray: { showIdle: false, maxSessionsPerWorkspace: 6, showHeaderCounts: true, showFooter: true },
+    notifications: {
+      notifyOnCompleted: true,
+      notifyOnFailed: true,
+      notifyOnAttention: true,
+      suppressWhenFocused: true,
+      notificationSound: true
+    }
+  })
+  assert.deepEqual(read.warnings, [])
+})
+
+test('state: contract v2 options normalize, clamp and fall back for invalid values', () => {
+  const read = stateModule.normalizeState(
+    sampleState({
+      schemaVersion: 2,
+      options: {
+        tray: { showIdle: true, maxSessionsPerWorkspace: 99, showHeaderCounts: 'yes', showFooter: false },
+        notifications: { notifyOnCompleted: false, suppressWhenFocused: false, notificationSound: false }
+      }
+    })
+  )
+  assert.equal(read.ok, true)
+  assert.equal(read.state.schemaVersion, 2)
+  assert.equal(read.state.options.tray.showIdle, true)
+  assert.equal(read.state.options.tray.maxSessionsPerWorkspace, constants.LIMITS.maxSessionsPerWorkspaceOption)
+  assert.equal(read.state.options.tray.showHeaderCounts, true, 'invalid boolean falls back to default')
+  assert.equal(read.state.options.tray.showFooter, false)
+  assert.equal(read.state.options.notifications.notifyOnCompleted, false)
+  assert.equal(read.state.options.notifications.notifyOnFailed, true)
+  assert.equal(read.state.options.notifications.suppressWhenFocused, false)
+  assert.equal(read.state.options.notifications.notificationSound, false)
+  assert.ok(read.warnings.length > 0)
+})
+
+test('state: v2 without options warns and uses defaults; unsupported schema parses best-effort', () => {
+  const missing = stateModule.normalizeState(sampleState({ schemaVersion: 2 }))
+  assert.equal(missing.ok, true)
+  assert.deepEqual(missing.state.options, constants.DEFAULT_OPTIONS)
+  assert.ok(missing.warnings.some((warning) => warning.includes('options')))
+
+  const future = stateModule.normalizeState(sampleState({ schemaVersion: 9 }))
+  assert.equal(future.ok, true)
+  assert.ok(future.warnings.some((warning) => warning.includes('schemaVersion')))
+})
+
+test('constants: version 0.2.0 and contract schema v2', () => {
+  assert.equal(constants.VERSION, '0.2.0')
+  assert.equal(constants.SCHEMA_VERSION, 2)
+  assert.deepEqual([...constants.SUPPORTED_SCHEMA_VERSIONS], [1, 2])
+})
+
 // --- menu model --------------------------------------------------------------
 
 test('menu: header counts running and pending only', () => {
@@ -367,7 +424,7 @@ test('menu: header counts running and pending only', () => {
   assert.equal(section[0].enabled, false)
 })
 
-test('menu: sessions are sorted by attention priority with glyphs', () => {
+test('menu: sessions sorted by attention priority and idle hidden by default', () => {
   const read = stateModule.normalizeState(
     sampleState({
       workspaces: [
@@ -387,23 +444,33 @@ test('menu: sessions are sorted by attention priority with glyphs', () => {
       ]
     })
   )
-  const section = menuModel.buildStatusSection(read.state, { version: '0.1.0', locale: 'zh-CN' })
+  assert.equal(read.state.options.tray.showIdle, false, 'contract default hides idle')
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   assert.ok(workspace)
   assert.equal(workspace.label, '📁 WS  运行 1 · 待处理 3')
   const activeLabels = workspace.submenu.filter((item) => item.kind === 'session').map((item) => item.label)
   assert.deepEqual(activeLabels, ['⏸ a', '❓ c', '⌨ i', '▶ r', '✓ d', '✖ f'])
-  const idleGroup = workspace.submenu.find((item) => item.kind === 'idle-group')
-  assert.ok(idleGroup)
+  assert.equal(workspace.submenu.some((item) => item.kind === 'idle-group'), false, 'no idle submenu by default')
+  assert.equal(activeLabels.some((label) => label.startsWith('○')), false, 'no idle rows by default')
+
+  const shown = menuModel.buildStatusSection(read.state, {
+    version: '0.2.0',
+    locale: 'zh-CN',
+    tray: { showIdle: true }
+  })
+  const shownWorkspace = shown.find((item) => item.kind === 'workspace')
+  const idleGroup = shownWorkspace.submenu.find((item) => item.kind === 'idle-group')
+  assert.ok(idleGroup, 'idle submenu expected when showIdle=true')
   assert.equal(idleGroup.label, '空闲会话 (1)')
   assert.deepEqual(idleGroup.submenu.map((item) => item.label), ['○ x'])
 })
 
-test('menu: at most 6 active rows plus overflow row', () => {
+test('menu: at most 6 active rows plus overflow row (default maxSessionsPerWorkspace)', () => {
   const sessions = []
   for (let index = 0; index < 9; index += 1) sessions.push({ id: `r${index}`, title: `run ${index}`, status: 'running' })
   const read = stateModule.normalizeState(sampleState({ workspaces: [{ id: 'w', title: 'W', sessions }] }))
-  const section = menuModel.buildStatusSection(read.state, { version: '0.1.0', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   const active = workspace.submenu.filter((item) => item.kind === 'session')
   assert.equal(active.length, 6)
@@ -412,12 +479,57 @@ test('menu: at most 6 active rows plus overflow row', () => {
   assert.equal(overflow.label, '… 还有 3 个会话')
 })
 
-test('menu: idle sessions are collapsed into a bounded submenu', () => {
+test('menu: options.tray.maxSessionsPerWorkspace drives the inline row limit', () => {
+  const sessions = []
+  for (let index = 0; index < 5; index += 1) sessions.push({ id: `r${index}`, title: `run ${index}`, status: 'running' })
+  const published = stateModule.normalizeState(
+    sampleState({
+      schemaVersion: 2,
+      options: { tray: { maxSessionsPerWorkspace: 2 } },
+      workspaces: [{ id: 'w', title: 'W', sessions }]
+    })
+  )
+  const section = menuModel.buildStatusSection(published.state, { version: '0.2.0', locale: 'zh-CN' })
+  const workspace = section.find((item) => item.kind === 'workspace')
+  assert.equal(workspace.submenu.filter((item) => item.kind === 'session').length, 2)
+  assert.ok(workspace.submenu.some((item) => item.label === '… 还有 3 个会话'))
+
+  // Out-of-range published values are clamped to 1..20 by state normalization.
+  const clamped = stateModule.normalizeState(
+    sampleState({ schemaVersion: 2, options: { tray: { maxSessionsPerWorkspace: 99 } }, workspaces: [{ id: 'w', title: 'W', sessions }] })
+  )
+  assert.equal(clamped.state.options.tray.maxSessionsPerWorkspace, 20)
+})
+
+test('menu: showHeaderCounts=false renders the global header without counts', () => {
+  const read = stateModule.normalizeState(
+    sampleState({ schemaVersion: 2, options: { tray: { showHeaderCounts: false } } })
+  )
+  const zh = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
+  assert.equal(zh[0].label, '对话')
+  const en = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'en-US' })
+  assert.equal(en[0].label, 'Conversations')
+})
+
+test('menu: showFooter=false removes the version footer', () => {
+  const read = stateModule.normalizeState(sampleState({ schemaVersion: 2, options: { tray: { showFooter: false } } }))
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
+  assert.equal(section.some((item) => item.kind === 'footer'), false)
+  assert.equal(section[section.length - 1].kind, 'workspace')
+})
+
+test('menu: idle sessions are collapsed into a bounded submenu when showIdle=true', () => {
   const sessions = []
   for (let index = 0; index < 13; index += 1) sessions.push({ id: `i${index}`, title: `idle ${index}`, status: 'idle' })
   sessions.push({ id: 'run', title: 'run', status: 'running' })
-  const read = stateModule.normalizeState(sampleState({ workspaces: [{ id: 'w', title: 'W', sessions }] }))
-  const section = menuModel.buildStatusSection(read.state, { version: '0.1.0', locale: 'zh-CN' })
+  const read = stateModule.normalizeState(
+    sampleState({
+      schemaVersion: 2,
+      options: { tray: { showIdle: true } },
+      workspaces: [{ id: 'w', title: 'W', sessions }]
+    })
+  )
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.0', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   assert.equal(workspace.label, '📁 W  运行 1 · 待处理 0')
   assert.equal(workspace.submenu.filter((item) => item.kind === 'session').length, 1, 'idle rows must not be inline')
@@ -577,6 +689,63 @@ test('notify: stale events (older than 10 min) are marked seen but never notifie
   assert.equal(plan.candidates, 1)
   assert.equal(plan.notifications.length, 1)
   assert.equal(plan.notifications[0].title, 'title-fresh')
+})
+
+test('notify: contract v2 kind filters consume disabled kinds silently', () => {
+  const events = [
+    event('c1', { kind: 'completed' }),
+    event('f1', { kind: 'failed' }),
+    event('a1', { kind: 'needs-attention' })
+  ]
+  const plan = notifyPolicy.planNotifications(events, {
+    now: 10000,
+    focused: false,
+    seenIds: [],
+    lastNotifyAt: 0,
+    options: { notifyOnCompleted: false, notifyOnFailed: true, notifyOnAttention: false }
+  })
+  assert.deepEqual(plan.filteredIds, ['c1', 'a1'])
+  assert.ok(plan.seenIdsToAdd.includes('c1'))
+  assert.ok(plan.seenIdsToAdd.includes('a1'))
+  assert.equal(plan.notifications.length, 1)
+  assert.deepEqual(plan.notifications[0].eventIds, ['f1'])
+})
+
+test('notify: suppressWhenFocused=false notifies even while focused', () => {
+  const plan = notifyPolicy.planNotifications([event('e1')], {
+    now: 10000,
+    focused: true,
+    visible: true,
+    seenIds: [],
+    lastNotifyAt: 0,
+    options: { suppressWhenFocused: false }
+  })
+  assert.equal(plan.suppressed, false)
+  assert.equal(plan.notifications.length, 1)
+
+  const defaultSettings = notifyPolicy.planNotifications([event('e1')], {
+    now: 10000,
+    focused: true,
+    seenIds: [],
+    lastNotifyAt: 0
+  })
+  assert.equal(defaultSettings.suppressed, true)
+})
+
+test('notify: notificationSound maps to silent flag', () => {
+  const withSound = notifyPolicy.planNotifications([event('e1')], { now: 10000, focused: false, seenIds: [], lastNotifyAt: 0 })
+  assert.equal(withSound.silent, false)
+  assert.equal(withSound.notifications[0].silent, false)
+
+  const silentPlan = notifyPolicy.planNotifications([event('e1')], {
+    now: 10000,
+    focused: false,
+    seenIds: [],
+    lastNotifyAt: 0,
+    options: { notificationSound: false }
+  })
+  assert.equal(silentPlan.silent, true)
+  assert.equal(silentPlan.notifications[0].silent, true)
 })
 
 // --- cursor ------------------------------------------------------------------
@@ -798,7 +967,7 @@ test('bridge: patch + adoption + menu rebuild from captured shell items', async 
     assert.ok(labels.includes('📁 dsh_tray_follower  运行 1 · 待处理 1'), `missing workspace row: ${labels.join(' | ')}`)
     assert.ok(labels.includes('▶ 配置 Git 等工程管理'))
     assert.ok(labels.includes('⏸ 等待批准'))
-    assert.ok(labels.includes('dsh-tray-follower v0.1.0'))
+    assert.ok(labels.includes('dsh-tray-follower v0.2.0'))
     assert.equal(bridge.diagnostics().capturedItemCount, 3, 'captured template must be the shell menu, not the merged menu')
 
     // The captured original click handler still works after the rebuild.
@@ -952,6 +1121,126 @@ test('bridge: focused window suppresses notifications', async () => {
     writeStateFile(dir, sampleState({ unreadEvents: [event('e1')] }))
     bridge.pollNow('test')
     assert.equal(fake.shownNotifications.length, 0)
+    bridge.stop()
+  })
+})
+
+test('bridge: v2 notification settings drive kind filters and silent flags', async () => {
+  await withTempDir(async (dir) => {
+    const window = createFakeWindow({ url: 'dsh-app://app/', visible: false, focused: false })
+    const { electron, fake } = createFakeElectron({ windows: [window], userDataDir: dir })
+    const bridge = bridgeModule.createBridge({
+      api: electron,
+      env: {},
+      dataDir: dir,
+      hookDir: shellHookRoot,
+      timers: false,
+      testMode: false
+    })
+    bridge.start()
+    const tray = new electron.Tray()
+    tray.setContextMenu(new electron.Menu([{ label: 'Open', click: () => {} }]))
+    // First poll with one pre-existing event consumes the silent first-run baseline.
+    writeStateFile(dir, sampleState({ unreadEvents: [event('priming')] }))
+    bridge.pollNow('test')
+    assert.equal(fake.shownNotifications.length, 0)
+
+    writeStateFile(
+      dir,
+      sampleState({
+        schemaVersion: 2,
+        options: { notifications: { notifyOnCompleted: false, notificationSound: false } },
+        unreadEvents: [
+          event('priming'),
+          event('done', { kind: 'completed', title: '任务完成', body: 'ws • done' }),
+          event('fail', { kind: 'failed', title: '任务失败', body: 'ws • failed' })
+        ]
+      })
+    )
+    bridge.pollNow('test')
+    assert.equal(fake.shownNotifications.length, 1, 'completed kind is disabled, failed kind notifies')
+    assert.equal(fake.shownNotifications[0].title, '任务失败')
+    assert.equal(fake.shownNotifications[0].silent, true, 'notificationSound=false must set silent:true')
+    const cursor = JSON.parse(fs.readFileSync(path.join(dir, 'cursor.json'), 'utf8'))
+    assert.deepEqual([...cursor.seenEventIds].sort(), ['done', 'fail', 'priming'])
+    const logContent = fs.readFileSync(path.join(dir, 'bridge.log'), 'utf8')
+    assert.match(logContent, /notification-filtered/)
+    bridge.stop()
+  })
+})
+
+test('bridge: v2 suppressWhenFocused=false notifies while focused', async () => {
+  await withTempDir(async (dir) => {
+    const window = createFakeWindow({ url: 'dsh-app://app/', visible: true, focused: true })
+    const { electron, fake } = createFakeElectron({ windows: [window], userDataDir: dir })
+    const bridge = bridgeModule.createBridge({
+      api: electron,
+      env: {},
+      dataDir: dir,
+      hookDir: shellHookRoot,
+      timers: false,
+      testMode: false
+    })
+    bridge.start()
+    writeStateFile(dir, sampleState({ unreadEvents: [event('priming')] }))
+    bridge.pollNow('test') // consume the silent first-run baseline
+    assert.equal(fake.shownNotifications.length, 0)
+    writeStateFile(
+      dir,
+      sampleState({
+        schemaVersion: 2,
+        options: { notifications: { suppressWhenFocused: false } },
+        unreadEvents: [event('priming'), event('e-focused', { kind: 'failed', title: '任务失败', body: 'ws • focused' })]
+      })
+    )
+    bridge.pollNow('test')
+    assert.equal(fake.shownNotifications.length, 1)
+    assert.equal(fake.shownNotifications[0].title, '任务失败')
+    bridge.stop()
+  })
+})
+
+test('bridge: v2 options.tray.showIdle toggles idle rows in the rebuilt menu', async () => {
+  await withTempDir(async (dir) => {
+    const window = createFakeWindow({ url: 'dsh-app://app/', visible: false, focused: false })
+    const { electron } = createFakeElectron({ windows: [window], userDataDir: dir })
+    const idleSession = { id: 'idle-1', title: '空闲历史对话', status: 'idle' }
+    writeStateFile(
+      dir,
+      sampleState({
+        schemaVersion: 2,
+        options: { tray: { showIdle: true } },
+        workspaces: [{ id: 'w', title: 'W', sessions: [idleSession] }]
+      })
+    )
+    const bridge = bridgeModule.createBridge({
+      api: electron,
+      env: {},
+      dataDir: dir,
+      hookDir: shellHookRoot,
+      timers: false,
+      testMode: false
+    })
+    bridge.start()
+    const tray = new electron.Tray()
+    tray.setContextMenu(new electron.Menu([{ label: 'Open', click: () => {} }]))
+    let labels = flattenLabels(tray.menuSets[tray.menuSets.length - 1].items)
+    assert.ok(labels.includes('空闲会话 (1)'), `showIdle=true must render idle submenu: ${labels.join(' | ')}`)
+    assert.ok(labels.includes('○ 空闲历史对话'))
+
+    writeStateFile(
+      dir,
+      sampleState({
+        schemaVersion: 2,
+        options: { tray: { showIdle: false } },
+        workspaces: [{ id: 'w', title: 'W', sessions: [idleSession] }]
+      })
+    )
+    bridge.pollNow('test')
+    labels = flattenLabels(tray.menuSets[tray.menuSets.length - 1].items)
+    assert.equal(labels.some((label) => label.startsWith('空闲会话')), false, 'showIdle=false must hide the idle submenu')
+    assert.equal(labels.some((label) => label.startsWith('○')), false, 'showIdle=false must hide idle rows')
+    assert.ok(labels.includes('（无对话）'), 'workspace with only hidden idle sessions shows the empty placeholder')
     bridge.stop()
   })
 })

@@ -1,7 +1,10 @@
 /**
- * State-file contract v1 (docs/DESIGN.md §4): grouping, document building and
+ * State-file contract v2 (docs/DESIGN.md §4): grouping, document building and
  * a strict validator used by the tests (and available to the Host for
  * defensive checks before writing).
+ *
+ * v2 adds the top-level `options` object: the live settings snapshot the
+ * desktop bridge uses to render the tray menu and suppress notifications.
  */
 import {
   SCHEMA_VERSION,
@@ -10,15 +13,25 @@ import {
   UNASSIGNED_WORKSPACE_ID,
   UNREAD_KINDS,
 } from './constants.js'
+import {
+  MAX_SESSIONS_PER_WORKSPACE_MAX,
+  MAX_SESSIONS_PER_WORKSPACE_MIN,
+  OPTION_FIELDS,
+  OPTION_SECTIONS,
+  defaultOptions,
+  normalizeOptions,
+} from './settings.js'
 import { createStrings } from './strings.js'
 
 /**
  * @typedef {{ id: string, title: string, path: string, sessions: any[] }} WorkspaceSection
+ * @typedef {{ tray: Record<string, boolean | number>, notifications: Record<string, boolean> }} StateOptions
  * @typedef {{
  *   schemaVersion: number,
  *   updatedAt: number,
  *   hostPid: number,
  *   webOrigin: string,
+ *   options: StateOptions,
  *   workspaces: WorkspaceSection[],
  *   unreadEvents: any[],
  * }} StateDocument
@@ -111,6 +124,7 @@ export function compareSessions(left, right) {
  *   hostPid?: number,
  *   now?: number,
  *   strings?: { text: (key: string, params?: Record<string, unknown>) => string },
+ *   options?: StateOptions,
  * }} input
  * @returns {StateDocument}
  */
@@ -123,6 +137,7 @@ export function buildStateDocument(input) {
     updatedAt: now,
     hostPid: Number.isInteger(input?.hostPid) ? input.hostPid : process.pid,
     webOrigin: typeof input?.webOrigin === 'string' ? input.webOrigin : '',
+    options: input?.options === undefined ? defaultOptions() : normalizeOptions(input.options),
     workspaces: groupSessions(sessions, input?.workspaces ?? [], input?.strings),
     unreadEvents: unreadEvents.map((event) => ({
       id: event.id,
@@ -155,6 +170,29 @@ export function validateStateDocument(document) {
   if (!Number.isInteger(doc.hostPid) || doc.hostPid <= 0) push('hostPid must be a positive integer')
   if (typeof doc.webOrigin !== 'string') push('webOrigin must be a string')
   else if (doc.webOrigin !== '' && !/^https?:\/\//u.test(doc.webOrigin)) push('webOrigin must be empty or an http(s) URL')
+  if (doc.options === null || typeof doc.options !== 'object' || Array.isArray(doc.options)) {
+    push('options must be an object')
+  } else {
+    for (const section of OPTION_SECTIONS) {
+      const values = doc.options[section]
+      if (values === null || typeof values !== 'object' || Array.isArray(values)) {
+        push(`options.${section} must be an object`)
+        continue
+      }
+      for (const field of OPTION_FIELDS[section]) {
+        const value = values[field]
+        if (field === 'maxSessionsPerWorkspace') {
+          if (!Number.isInteger(value)
+            || value < MAX_SESSIONS_PER_WORKSPACE_MIN
+            || value > MAX_SESSIONS_PER_WORKSPACE_MAX) {
+            push(`options.${section}.${field} must be an integer between ${MAX_SESSIONS_PER_WORKSPACE_MIN} and ${MAX_SESSIONS_PER_WORKSPACE_MAX}`)
+          }
+        } else if (typeof value !== 'boolean') {
+          push(`options.${section}.${field} must be a boolean`)
+        }
+      }
+    }
+  }
   if (!Array.isArray(doc.workspaces)) {
     push('workspaces must be an array')
     return { ok: errors.length === 0, errors }

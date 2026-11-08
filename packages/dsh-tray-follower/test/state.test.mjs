@@ -56,10 +56,22 @@ test('buildStateDocument produces the docs/DESIGN.md §4 contract and validates'
     strings,
   })
 
+  // Contract v2: no Config passed → every option takes its schema default.
+  assert.equal(SCHEMA_VERSION, 2)
   assert.equal(document.schemaVersion, SCHEMA_VERSION)
   assert.equal(document.updatedAt, NOW + 10)
   assert.equal(document.hostPid, 4321)
   assert.equal(document.webOrigin, 'http://127.0.0.1:61983')
+  assert.deepEqual(document.options, {
+    tray: { showIdle: false, maxSessionsPerWorkspace: 6, showHeaderCounts: true, showFooter: true },
+    notifications: {
+      notifyOnCompleted: true,
+      notifyOnFailed: true,
+      notifyOnAttention: true,
+      suppressWhenFocused: true,
+      notificationSound: true,
+    },
+  })
 
   // Only workspaces with conversations are published; empty ones are skipped.
   assert.deepEqual(document.workspaces.map((workspace) => workspace.id), ['ws_alpha', 'unassigned'])
@@ -95,6 +107,34 @@ test('empty tracker still builds a valid document', () => {
   assert.ok(validateStateDocument(document).ok)
   assert.deepEqual(document.workspaces, [])
   assert.deepEqual(document.unreadEvents, [])
+  assert.equal(document.options.tray.showIdle, false)
+  assert.equal(document.options.notifications.suppressWhenFocused, true)
+})
+
+test('buildStateDocument normalizes an explicit options object', () => {
+  const tracker = new SessionTracker({ now: () => NOW, strings })
+  const document = buildStateDocument({
+    tracker,
+    workspaces: [],
+    hostPid: 1,
+    now: NOW,
+    strings,
+    options: {
+      tray: { showIdle: true, maxSessionsPerWorkspace: 99, showHeaderCounts: 'yes', showFooter: false },
+      notifications: { notifyOnCompleted: false },
+    },
+  })
+  assert.deepEqual(document.options, {
+    tray: { showIdle: true, maxSessionsPerWorkspace: 20, showHeaderCounts: true, showFooter: false },
+    notifications: {
+      notifyOnCompleted: false,
+      notifyOnFailed: true,
+      notifyOnAttention: true,
+      suppressWhenFocused: true,
+      notificationSound: true,
+    },
+  })
+  assert.ok(validateStateDocument(document).ok)
 })
 
 test('groupSessions keeps registry order and sorts sessions by urgency then recency', () => {
@@ -130,6 +170,10 @@ test('validator reports every contract violation', () => {
   document.schemaVersion = 99
   document.hostPid = 'nope'
   document.webOrigin = 'not a url'
+  document.options.tray.showIdle = 'yes'
+  document.options.tray.maxSessionsPerWorkspace = 0
+  document.options.notifications.notifyOnCompleted = 'sure'
+  document.options.notifications.extra = true // unknown keys are tolerated
   document.workspaces[0].sessions[0].status = 'sleeping'
   document.workspaces[0].sessions[0].id = ''
   document.workspaces[1].id = 'ws_alpha' // duplicate workspace id
@@ -139,9 +183,12 @@ test('validator reports every contract violation', () => {
   assert.equal(validation.ok, false)
   const joined = validation.errors.join('\n')
   for (const expected of [
-    'schemaVersion must be 1',
+    'schemaVersion must be 2',
     'hostPid must be a positive integer',
     'webOrigin must be empty or an http(s) URL',
+    'options.tray.showIdle must be a boolean',
+    'options.tray.maxSessionsPerWorkspace must be an integer between 1 and 20',
+    'options.notifications.notifyOnCompleted must be a boolean',
     'is not a contract status',
     'id duplicated: ws_alpha',
     'is not a contract kind',
@@ -149,6 +196,22 @@ test('validator reports every contract violation', () => {
   ]) {
     assert.ok(joined.includes(expected), `missing: ${expected}\n${joined}`)
   }
+  assert.ok(!joined.includes('options.notifications.extra'), 'unknown option keys must be tolerated')
+})
+
+test('validator rejects a missing or malformed options object', () => {
+  const tracker = seedTracker()
+  const base = buildStateDocument({ tracker, workspaces: WORKSPACES, hostPid: 1, now: NOW, strings })
+
+  const missing = { ...base }
+  delete missing.options
+  assert.ok(validateStateDocument(missing).errors.includes('options must be an object'))
+
+  const notAnObject = { ...base, options: [] }
+  assert.ok(validateStateDocument(notAnObject).errors.includes('options must be an object'))
+
+  const missingSection = { ...base, options: { tray: base.options.tray } }
+  assert.ok(validateStateDocument(missingSection).errors.includes('options.notifications must be an object'))
 })
 
 test('validator rejects non-objects without throwing', () => {

@@ -1,9 +1,15 @@
-# dsh-tray-follower — DSH Desktop shell bridge
+# dsh-tray-follower — DSH Desktop shell bridge (v0.2.0)
 
 This is the **optional native desktop half** of `dsh-tray-follower`. It runs inside
 the DSH Desktop Electron **main process**, extends the Windows system-tray menu
 with per-workspace conversation status, and raises native Electron notifications
 when a conversation needs attention while DSH is hidden/unfocused.
+
+Since **v0.2.0** the bridge is settings-driven through the state contract v2
+(`options` block published by the host plugin): idle conversations are hidden from
+the tray menu by default, and row counts / header counts / footer as well as the
+notification kind filters, focus suppression and sound are controlled by the DSH
+settings page. Older v1 state files keep working with exactly these defaults.
 
 The other half is the DSH plugin bundle in `packages/dsh-tray-follower/`, which
 tracks conversations and publishes `%LOCALAPPDATA%\dsh-tray-follower\state.json`
@@ -124,23 +130,28 @@ handlers preserved). On every state change the bridge rebuilds:
 ──────────────
 <shell Quit item>                        (captured, e.g. 退出应用)
 ──────────────
-对话：1 运行 / 2 待处理                    (disabled header)
+对话：1 运行 / 2 待处理                    (disabled header; settings: showHeaderCounts)
 📁 dsh_tray_follower  运行 1 · 待处理 1    (submenu)
    ⏸ 等待批准的对话
    ▶ 配置 Git 等工程管理
-   … 还有 3 个会话                         (disabled overflow, only if > 6 active)
-   空闲会话 (8)                            (submenu, idle history)
-      ○ 空闲会话 1
-      … (up to 10)
+   … 还有 3 个会话                         (disabled overflow, only if > maxSessionsPerWorkspace)
 📁 default-workspace  运行 1 · 待处理 0
    …
-dsh-tray-follower v0.1.0                 (disabled footer)
+dsh-tray-follower v0.2.0                 (disabled footer; settings: showFooter)
 ```
 
+- **Idle conversations are hidden by default** (`options.tray.showIdle=false`,
+  contract v2). Only when the user enables “also list idle conversations” in DSH
+  settings do they appear, and then they are collapsed into one
+  `空闲会话 (N)` / `Idle sessions (N)` submenu (up to 10 rows) instead of inline
+  rows. Idle sessions are never listed inline.
 - Session order per workspace: `waiting-approval` / `waiting-choice` /
-  `waiting-input` first, then `running`, then `completed` / `failed`, then idle.
-- At most 6 active rows inline; idle sessions are collapsed into one
-  `空闲会话 (N)` / `Idle sessions (N)` submenu (up to 10 rows).
+  `waiting-input` first, then `running`, then `completed` / `failed`.
+- At most `options.tray.maxSessionsPerWorkspace` active rows (1..20, default 6)
+  are rendered inline, followed by a disabled `… 还有 N 个会话` overflow row.
+- `options.tray.showHeaderCounts=false` renders the global header as `对话` /
+  `Conversations` (without counts); `options.tray.showFooter=false` removes the
+  version footer.
 - Rows use the status glyphs `▶ ⏸ ❓ ⌨ ✓ ✖ ○`; clicking a session row focuses the
   DSH window.
 - Chinese labels when Electron's locale starts with `zh`, English otherwise.
@@ -148,6 +159,29 @@ dsh-tray-follower v0.1.0                 (disabled footer)
   the bridge adopts the existing Tray from the V8 heap and reconstructs equivalent
   localized `Open`/`Quit` items (focus window / `app.quit()`); the next shell
   `relabel()` upgrades them to the real captured items.
+
+### Settings published by the host (contract v2)
+
+`state.json` carries a top-level `options` object (schemaVersion `2`). The bridge
+normalizes it defensively: missing files (v1) or invalid values fall back to these
+defaults, and `maxSessionsPerWorkspace` is clamped to 1..20.
+
+| Field | Default | Effect |
+| --- | --- | --- |
+| `options.tray.showIdle` | `false` | also list idle conversations (collapsed submenu) |
+| `options.tray.maxSessionsPerWorkspace` | `6` | max inline session rows per workspace |
+| `options.tray.showHeaderCounts` | `true` | global header shows `对话：N 运行 / M 待处理` |
+| `options.tray.showFooter` | `true` | show the `dsh-tray-follower vX.Y.Z` footer |
+| `options.notifications.notifyOnCompleted` | `true` | notify for `completed` events |
+| `options.notifications.notifyOnFailed` | `true` | notify for `failed` events |
+| `options.notifications.notifyOnAttention` | `true` | notify for `needs-attention` events |
+| `options.notifications.suppressWhenFocused` | `true` | stay silent while the DSH window is focused |
+| `options.notifications.notificationSound` | `true` | sound on (`silent: !notificationSound`) |
+
+Settings are read from every state poll (1 s), so a change in the DSH settings page
+applies to the tray menu / notifications without restarting DSH. The bridge also
+exposes the effective values in its diagnostics (`options` field) for tests and
+troubleshooting.
 
 ### Native notifications
 
@@ -162,8 +196,16 @@ DSH). PowerShell in `bridge/injector/` is used only for process enumeration and
 `.lnk` editing — never for notifications.
 
 - Polls `state.json`'s `unreadEvents` every second.
-- Never notifies while the main window is focused; hidden/minimized/unfocused
-  windows notify (docs/DESIGN.md R2/R3).
+- **Settings-driven filtering (contract v2):** only event kinds enabled by
+  `notifyOnCompleted` / `notifyOnFailed` / `notifyOnAttention` are notified; a
+  disabled kind is consumed silently (marked seen) so toggling it back on cannot
+  replay old history.
+- **Focus suppression:** with `suppressWhenFocused=true` (default) nothing is
+  notified while the DSH window is focused; set it to `false` in the settings page
+  to be notified even then. Hidden/minimized windows always notify
+  (docs/DESIGN.md R2/R3).
+- **Sound:** `notificationSound=true` (default) keeps the toast audible; `false`
+  maps to `silent: !notificationSound` on the Electron notification.
 - Dedupe by event id in `cursor.json` (capped at 500 ids).
 - Bursts observed in one poll collapse into a summary
   (`N 个对话需要关注`), rate limited to one notification per 2 s.
@@ -204,13 +246,16 @@ crash DSH; the plugin half still works without the bridge (fallback toasts).
 node tools/bridge-selftest.mjs
 ```
 
-54 tests cover state parsing/normalization, menu model (priority order, overflow,
-idle grouping, zh/en counts, placeholders), notification policy (dedupe, baseline,
-focused suppression, coalescing, rate limit, stale-event replay guard), cursor
-persistence, tray patch capture/adoption/no-recursion, window focus helpers,
-heartbeat contract, log rotation, the full bridge core with a fake `electron` API,
-and the injector pure helpers (env sanitization, bootstrap escaping, DSH process
-detection, shortcut classification).
+67 tests cover state parsing/normalization (contract v1 **and** v2 options with
+clamping/fallbacks), menu model (priority order, idle hidden by default /
+optional idle submenu, settings-driven row limit, header counts / footer toggles,
+overflow, zh/en labels, placeholders), notification policy (dedupe, baseline,
+kind filters, `suppressWhenFocused`, `notificationSound`→`silent`, coalescing,
+rate limit, stale-event replay guard), cursor persistence, tray patch
+capture/adoption/no-recursion, window focus helpers, heartbeat contract, log
+rotation, the full bridge core with a fake `electron` API (including v2 settings
+end-to-end), and the injector pure helpers (env sanitization, bootstrap escaping,
+DSH process detection, shortcut classification).
 
 ### Isolated end-to-end probe (launches a *second* DSH instance)
 
@@ -231,10 +276,13 @@ Expected evidence (printed as `PASS …` lines, exit code 0):
 
 - `hook injected (patched=true, adoptedTrays≥1)`
 - `tray adopted`
-- `menu rebuilt with header "对话：1 运行 / 2 待处理"` and the fixture's
+- `contract-v2 tray defaults applied (showIdle=false, maxSessionsPerWorkspace=6, showHeaderCounts=true, showFooter=true)`
+- `menu rebuilt with header "对话：1 运行 / 1 待处理"` and the fixture's
   workspace/session rows (`📁 探针工作区 A  运行 1 · 待处理 1`,
   `⏸ 等待批准的对话`, `▶ 运行中的对话`, `✓ 已完成的对话`,
-  `📁 Probe Workspace B  运行 0 · 待处理 0`, `空闲会话 (1)`, `○ 空闲对话`)
+  `📁 Probe Workspace B  运行 0 · 待处理 0`, `（无对话）`; the fixture includes
+  idle sessions in both workspaces and they must NOT appear)
+- `idle conversations hidden by default (no idle rows, no 空闲会话 submenu)`
 - `original menu items present: …` (shell-captured Open/Quit, or the localized
   reconstructed items when adoption happened first)
 - `notification API is in-process Electron Notification (provider=electron-main-process, isSupported=true) — attributed to DeepSeek Harness, no external notifier process`
@@ -251,10 +299,14 @@ DSH instance.
 
 1. Install, fully quit DSH, relaunch from the DeepSeek Harness shortcut.
 2. Watch `%LOCALAPPDATA%\dsh-tray-follower\injector.log` for `BRIDGE_OK`.
-3. Right-click the tray icon: `对话：N 运行 / M 待处理` + workspace submenus.
+3. Right-click the tray icon: `对话：N 运行 / M 待处理` + workspace submenus
+   (idle conversations are hidden by default until enabled in DSH settings).
 4. Hide/minimize DSH, trigger an approval request in a conversation: a native DSH
    notification appears; clicking it focuses DSH.
-5. `node tools/uninstall-bridge.mjs --apply`, relaunch: the tray menu is back to
+5. Change settings in DSH (e.g. “also list idle conversations”, disable a
+   notification kind): the tray menu / notifications update within ~1 s without a
+   DSH restart.
+6. `node tools/uninstall-bridge.mjs --apply`, relaunch: the tray menu is back to
    the shell's original `Open`/`Quit`.
 
 ---

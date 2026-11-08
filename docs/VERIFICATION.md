@@ -24,8 +24,11 @@
 - `updatedAt` 每 5 s 刷新（Host 存活信号）；
 - `unreadEvents` 在会话完成时出现 `kind: "completed"` 事件（真实 turn 结束触发，已验证一次）。
 
-单元测试：`node --test "packages/dsh-tray-follower/test/*.test.mjs"` → **51/51 通过**（2026-11-08）。
+单元测试：`node --test "packages/dsh-tray-follower/test/*.test.mjs"` → **74/74 通过**（2026-11-08，含 v0.2.0 settings/client 测试）。
 `node --check` 覆盖全部 JS。
+
+> v0.2.0 更新：Host 半现在提供 `Config` schema（9 个 `.volatile()` 字段），`state.json` 升级为
+> `schemaVersion: 2` 并带 `options`；Client 半注册「设置 → 托盘跟随」页面。详见 §6。
 
 ## 2. 桥接层（隔离实例 E2E，已 PASS）
 
@@ -102,3 +105,31 @@ node tools/install-bridge.mjs --apply
 - 注入器只绑定 `127.0.0.1` 并使用可用端口；注入完成后调用 `node:inspector.close()` 关闭端口。
 - 未修改 DSH 安装目录、未改系统/用户环境变量。
 - 桥接未安装/注入失败时行为：启动器以普通模式重新拉起 DSH（不阻塞用户使用），不启动任何外部通知进程。
+
+## 6. v0.2.0 功能验证（托盘菜单设置 + 通知设置 + 空闲对话隐藏 + 上架物料）
+
+### 6.1 代码与自检（本机实测）
+
+| 检查项 | 结果 |
+|---|---|
+| 插件测试 | `node --test "packages/dsh-tray-follower/test/*.test.mjs"` → **74/74 PASS**（含 settings 13 项、client 6 项） |
+| 桥接自检 | `node tools/bridge-selftest.mjs` → **67/67 PASS**（含 idle 隐藏默认、showIdle=true 子菜单、options 行数/页脚/计数、通知 kind 过滤、suppressWhenFocused=false、silent 标志） |
+| 全仓检查 | `node tools/check.mjs` → all checks passed |
+| 隔离实例 E2E | `node tools/probe-electron-hook.mjs --execute` → **PROBE RESULT: PASS**；证据含 `contract-v2 tray defaults applied`、`idle conversations hidden by default (no idle rows, no 空闲会话 submenu)`、header `对话：1 运行 / 1 待处理`、footer `dsh-tray-follower v0.2.0`、`notification-shown`（Electron 主进程） |
+| 市场发布物 | `node scripts/build-market-package.mjs` → `dist/dsh-tray-follower/`（50 files，`npm pack` 92.4 KiB / 50 entries，`node --check` 通过；report `ok:true`） |
+
+### 6.2 本机 live 安装验证（Host Config + Client 设置页）
+
+安装/重载方式：`plugin_manager set_bundle dsh-tray-follower` 关闭再开启（应用 `applied`，无需重启 DSH）。
+
+| 检查项 | 结果与证据 |
+|---|---|
+| 状态契约 v2 | PASS；重载后 `state.json` 立即变为 `schemaVersion: 2`，`options` 与契约默认值完全一致（`showIdle:false, maxSessionsPerWorkspace:6, showHeaderCounts:true, showFooter:true`；通知 5 项均 true） |
+| Host Config schema | PASS；`cordis_inspect_query Config.listConfigs` → entry `include:dsh-tray-follower`，`status: "schema"`，9 个字段全部 `x-cordis.volatile: true`，中英双语 description，number 字段 `minimum:1, maximum:20` |
+| Client 设置页注册 | PASS；`cordis_inspect_query client Slots.listSubTree root=settings.section` → occupants 含 `{id:"tray-follower", order:30, active:true}`（与 cost-meter 同为 order 30，居中排布） |
+| 桥接载荷更新 | PASS；`node tools/install-bridge.mjs --apply` 重新安装 v0.2.0 载荷到 `%LOCALAPPDATA%\dsh-tray-follower\app`（shell-hook/injector/launcher + install.json），开始菜单快捷方式保持指向启动器、桌面快捷方式 already |
+| 待重启确认 | **未验证（需用户重启 DSH）**：当前运行的桥接仍是 v0.1.0 进程内代码，托盘菜单要等 DSH 从快捷方式重启后才会应用 v0.2.0 的“空闲对话默认隐藏 + 设置即时生效”；`bridge.log` 目前记录 `schemaVersion 2 is not 1; parsed best-effort`（旧桥接对 v2 的兼容告警），重启后应消失 |
+
+### 6.3 上架物料
+
+`LICENSE`、`CHANGELOG.md`、`marketplace/{package-readme.md, awesome-plugin-entry.json, market-index-entry.json, PUBLISHING.md, VALIDATION.md}`、`scripts/build-market-package.mjs` 均已就绪；发布需 npm 凭据与 awesome-dsh-plugin PR（本机不执行），步骤见 `marketplace/PUBLISHING.md`。

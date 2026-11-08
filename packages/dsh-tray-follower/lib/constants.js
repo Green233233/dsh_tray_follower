@@ -5,8 +5,11 @@
  * `node --test` and no DSH runtime.
  */
 
-/** Version of the state-file contract described in docs/DESIGN.md §4. */
-export const SCHEMA_VERSION = 1
+/**
+ * Version of the state-file contract described in docs/DESIGN.md §4.
+ * v2 added the top-level `options` object (live settings snapshot).
+ */
+export const SCHEMA_VERSION = 2
 
 /** Every status written into `workspaces[].sessions[].status` (contract order). */
 export const SESSION_STATUSES = Object.freeze([
@@ -32,6 +35,13 @@ export const ATTENTION_NOTIFY_DELAY_MS = 1_200
 
 /** Periodic tick that refreshes `updatedAt` and prunes stale entries. */
 export const TICK_INTERVAL_MS = 5_000
+
+/**
+ * Poll interval for the volatile Config references: a settings-page edit must
+ * reach `state.json` within ~1 s (docs/DESIGN.md §4.1) without waiting for the
+ * next conversation event or the 5 s tick.
+ */
+export const SETTINGS_POLL_INTERVAL_MS = 1_000
 
 /** How long a finished, no-longer-live session stays in the published state. */
 export const RETENTION_MS = 5 * 60_000

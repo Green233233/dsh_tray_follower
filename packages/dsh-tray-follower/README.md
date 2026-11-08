@@ -1,10 +1,11 @@
-# dsh-tray-follower (Host half)
+# dsh-tray-follower
 
-A dependency-free DSH **bundle** that tracks every top-level conversation of the
-running DeepSeek Harness Host, grouped by workspace, and publishes their status
-to a state file. The DSH Desktop **shell bridge** (see `bridge/shell-hook/` in
-the repository) reads that file to build the tray icon's right-click menu and to
-raise native notifications while the window is hidden or unfocused.
+A DSH **bundle** with a Host half and a small web Client half that tracks every
+top-level conversation of the running DeepSeek Harness Host, grouped by
+workspace, and publishes their status to a state file. The DSH Desktop **shell
+bridge** (see `bridge/shell-hook/` in the repository) reads that file to build
+the tray icon's right-click menu and to raise native notifications while the
+window is hidden or unfocused.
 
 The plugin publishes state only. **Notifications are emitted exclusively by the
 DSH Desktop shell bridge** (in-process Electron `Notification`, so they appear
@@ -13,9 +14,13 @@ process (no PowerShell/WinRT/notify-send). Without the bridge the plugin still
 publishes `state.json`, but no tray section and no OS notifications appear.
 
 - Package name / row: `dsh-tray-follower`
-- Host-only bundle (`index.js` exports `name`, `inject`, `apply`); no Client
-  half, no runtime dependencies, no `@deepseek-ai/*` imports.
-- State contract: [docs/DESIGN.md §4](../../docs/DESIGN.md) — implemented exactly.
+- Host half: `index.js` exports `Config`, `name`, `inject`, `apply`.
+- Client half: `client.js` registers the **Settings → Tray follower** page
+  (slot `settings.section`) that edits the Host `Config` live.
+- State contract: [docs/DESIGN.md §4 / §4.1](../../docs/DESIGN.md) — implemented exactly
+  (`schemaVersion: 2`, includes the published `options`).
+- One runtime dependency: `@deepseek-ai/schemastery` (the Host Config schema);
+  the Client half imports only React from the browser module table.
 
 ## What it publishes
 
@@ -25,10 +30,14 @@ publishes `state.json`, but no tray section and no OS notifications appear.
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "updatedAt": 1730000000000,
   "hostPid": 1234,
   "webOrigin": "http://127.0.0.1:61983",
+  "options": {
+    "tray": { "showIdle": false, "maxSessionsPerWorkspace": 6, "showHeaderCounts": true, "showFooter": true },
+    "notifications": { "notifyOnCompleted": true, "notifyOnFailed": true, "notifyOnAttention": true, "suppressWhenFocused": true, "notificationSound": true }
+  },
   "workspaces": [
     {
       "id": "ws_...",
@@ -113,16 +122,35 @@ main process (`new Notification(...)`), which Windows attributes to DeepSeek
 Harness itself. This matches the product requirement that notifications be sent
 in DSH's own name and that no external PowerShell/WinRT notifier be used.
 
-The bridge suppresses notifications while its window is focused/visible, keeps a
-persistent cursor so events are never replayed, silently baselines existing
-events on first run, and ignores events older than 10 minutes. When the bridge
-is not installed (or injection failed), the Host keeps publishing state and no
-OS notification is raised — a deliberately accepted degraded mode.
+The bridge suppresses notifications while its window is focused/visible (unless
+`suppressWhenFocused` is turned off), keeps a persistent cursor so events are
+never replayed, silently baselines existing events on first run, and ignores
+events older than 10 minutes. Kind filters and the sound toggle come from
+`state.json.options` (Settings → Tray follower). When the bridge is not
+installed (or injection failed), the Host keeps publishing state and no OS
+notification is raised — a deliberately accepted degraded mode.
 
-## Configuration (environment only)
+## Settings
 
-There is intentionally no `Config` schema: a plugin Config would need
-`@deepseek-ai/schemastery` and the bundle is dependency-free.
+All options live in **DSH Settings → Tray follower** (native page registered by
+`client.js`). They are declared as a `.volatile()` Host `Config` schema, so a
+change is applied without restarting DSH: the Host polls the live values every
+second and republishes `state.json.options` immediately; the bridge reads them on
+its next poll (≤1 s).
+
+| Field | Type / default | Group | Meaning |
+|---|---|---|---|
+| `showIdle` | boolean / `false` | Tray menu | Also list idle conversations (off = idle conversations never appear in the tray menu) |
+| `maxSessionsPerWorkspace` | number 1–20 / `6` | Tray menu | Max conversations listed per workspace (overflow shows "还有 N 个会话") |
+| `showHeaderCounts` | boolean / `true` | Tray menu | Show running/pending counts in the menu header |
+| `showFooter` | boolean / `true` | Tray menu | Show the version footer |
+| `notifyOnCompleted` | boolean / `true` | Notifications | Notify when a conversation completes/stops |
+| `notifyOnFailed` | boolean / `true` | Notifications | Notify when a conversation fails |
+| `notifyOnAttention` | boolean / `true` | Notifications | Notify when an approval/answer is needed |
+| `suppressWhenFocused` | boolean / `true` | Notifications | Stay quiet while the DSH window is focused |
+| `notificationSound` | boolean / `true` | Notifications | Play the system alert sound with each notification |
+
+Environment overrides are unchanged:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -132,10 +160,11 @@ There is intentionally no `Config` schema: a plugin Config would need
 ## Bundle contents
 
 ```
-package.json          name, exports (., ./locale/*.json, ./icon), files, dsh.bundle.patch
+package.json          name, exports (., ./client, ./locale/*.json, ./icon), files, dsh.bundle.patch, dsh.client
 cordis.patch.yml      insert row: id dsh-tray-follower, name dsh-tray-follower
-index.js              Host plugin: services, events, timers, state writer
+index.js              Host plugin: Config schema, services, events, timers, state writer
 lib/                  pure modules (unit-tested with node --test)
+client.js             Client half: Settings → Tray follower page (settings.section)
 locale/en.json        meta.title "Tray follower" / meta.description
 locale/zh.json        meta.title "托盘跟随者" / meta.description
 icon.svg              original icon (SVG, < 64 KiB)
@@ -162,11 +191,12 @@ node --test "packages/dsh-tray-follower/test/*.test.mjs"
 
 ## Known limitations
 
-- Host-only: no Client half, so no settings page; configuration is environment
-  only.
-- The Host cannot know whether the DSH window is focused: focus-based
-  suppression is the bridge's job. Without the bridge there is no notification at
-  all (by design — no external notifier process is started).
+- Host half cannot know whether the DSH window is focused: focus-based
+  suppression is the bridge's job. Without the bridge there is no tray section
+  and no notification at all (by design — no external notifier process is
+  started). The Settings page itself works without the bridge (it edits the
+  Host Config), but the settings only change tray/notification behaviour once
+  the bridge is installed and DSH was started from the bridge launcher.
 - Titles depend on the optional `sessionTitle` service (`sessionTitle.get`) and
   its `session/title` log event; without it the tray falls back to the working
   directory's last segment.

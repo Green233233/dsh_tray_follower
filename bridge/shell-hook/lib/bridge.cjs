@@ -7,6 +7,7 @@ const {
   VERSION,
   DATA_DIR_NAME,
   ENV,
+  DEFAULT_OPTIONS,
   LIMITS,
   RECONSTRUCTED_ITEM_LABELS,
   localeFamily
@@ -259,8 +260,16 @@ function createBridge(options = {}) {
       }
       const title = typeof spec.title === 'string' && spec.title ? spec.title : 'DSH 对话需要关注'
       const body = typeof spec.body === 'string' ? spec.body : ''
-      const notification = new Notification({ title, body })
-      const record = { kind: spec.kind || 'event', title, eventIds: Array.isArray(spec.eventIds) ? spec.eventIds : [], at: now() }
+      // settings.notifications.notificationSound => silent: !notificationSound
+      const silent = spec.silent === true
+      const notification = new Notification({ title, body, silent })
+      const record = {
+        kind: spec.kind || 'event',
+        title,
+        silent,
+        eventIds: Array.isArray(spec.eventIds) ? spec.eventIds : [],
+        at: now()
+      }
       try {
         notification.on('click', () => {
           logger.log('notification-click', { kind: record.kind })
@@ -281,11 +290,12 @@ function createBridge(options = {}) {
       bridge.notifications.push({ notification, record })
       while (bridge.notifications.length > LIMITS.notificationsKept) bridge.notifications.shift()
       bridge.notificationsShown += 1
-      logger.log('notification-shown', { kind: record.kind, title, count: record.eventIds.length })
+      logger.log('notification-shown', { kind: record.kind, title, silent, count: record.eventIds.length })
       logger.diag('notification-shown', {
         kind: record.kind,
         title,
         body,
+        silent,
         count: record.eventIds.length,
         eventIds: record.eventIds
       })
@@ -303,6 +313,8 @@ function createBridge(options = {}) {
     try {
       const windowState = bridge.windows && typeof bridge.windows.state === 'function' ? bridge.windows.state() : null
       const events = bridge.lastState && Array.isArray(bridge.lastState.unreadEvents) ? bridge.lastState.unreadEvents : []
+      const notificationOptions =
+        bridge.lastState && bridge.lastState.options ? bridge.lastState.options.notifications : undefined
       const plan = planNotifications(events, {
         now: now(),
         focused: windowState ? windowState.focused === true : false,
@@ -310,8 +322,8 @@ function createBridge(options = {}) {
         seenIds: bridge.cursor.seenEventIds,
         lastNotifyAt: bridge.cursor.lastNotifyAt,
         baseline: bridge.baselinePending === true,
+        options: notificationOptions,
         config: {
-          suppressWhenFocused: true,
           minIntervalMs: LIMITS.notifyMinIntervalMs,
           maxBodyLines: LIMITS.notifyMaxBodyLines,
           seenCap: LIMITS.seenCap
@@ -325,6 +337,12 @@ function createBridge(options = {}) {
         applySeen(plan.seenIdsToAdd, undefined, 'baseline')
         return
       }
+      if (plan.filteredIds.length > 0) {
+        // Settings disabled these kinds: consume silently so toggling them on later
+        // cannot replay history.
+        logger.log('notification-filtered', { count: plan.filteredIds.length })
+        logger.diag('notification-filtered', { count: plan.filteredIds.length, ids: plan.filteredIds })
+      }
       if (plan.suppressed) {
         if (plan.seenIdsToAdd.length > 0) {
           logger.log('notification-suppressed', { reason: 'focused', count: plan.seenIdsToAdd.length })
@@ -334,10 +352,16 @@ function createBridge(options = {}) {
         return
       }
       if (plan.deferredIds.length > 0) {
+        // Rate-limited: persist only the filtered/expired ids, keep the notifications
+        // pending for the next poll (they must not be marked seen yet).
+        if (plan.seenIdsToAdd.length > 0) applySeen(plan.seenIdsToAdd, undefined, 'deferred')
         logger.log('notification-deferred', { count: plan.deferredIds.length, reason: 'rate-limit' })
         return
       }
-      if (plan.notifications.length === 0) return
+      if (plan.notifications.length === 0) {
+        if (plan.seenIdsToAdd.length > 0) applySeen(plan.seenIdsToAdd, undefined, 'filtered')
+        return
+      }
       for (const spec of plan.notifications) {
         showNotification(spec, { trackPolicy: false })
       }
@@ -345,6 +369,7 @@ function createBridge(options = {}) {
       logger.log('notification-batch', {
         shown: plan.notifications.length,
         events: plan.seenIdsToAdd.length,
+        silent: plan.silent === true,
         focused: windowState ? windowState.focused === true : false,
         visible: windowState ? windowState.visible === true : false
       })
@@ -591,16 +616,20 @@ function createBridge(options = {}) {
         logger.diag('notification-test-skipped', { reason: 'DSH_TRAY_FOLLOWER_TEST_SHOW_NOTIFICATION=0' })
         return
       }
+      const notificationOptions =
+        bridge.lastState && bridge.lastState.options ? bridge.lastState.options.notifications : DEFAULT_OPTIONS.notifications
+      const silent = notificationOptions.notificationSound === false
       const shown = showNotification(
         {
           kind: 'test',
           title: 'DSH 托盘跟随（自检）',
           body: `桥接已注入 Electron 主进程；托盘 ${diagnostics.adoptedTrayCount} 个，菜单重建 ${diagnostics.menuRebuilds} 次。`,
-          eventIds: []
+          eventIds: [],
+          silent
         },
         { trackPolicy: false }
       )
-      logger.diag('notification-test', { shown })
+      logger.diag('notification-test', { shown, silent })
     } catch (error) {
       fail('self-test', error)
     }
@@ -944,6 +973,11 @@ function createBridge(options = {}) {
         loaded: bridge.cursorLoaded,
         seen: bridge.cursor.seenEventIds.length,
         lastNotifyAt: bridge.cursor.lastNotifyAt
+      },
+      /** Effective contract-v2 settings (defaults when the state file is v1/absent). */
+      options: {
+        tray: state && state.options ? state.options.tray : DEFAULT_OPTIONS.tray,
+        notifications: state && state.options ? state.options.notifications : DEFAULT_OPTIONS.notifications
       },
       notifications: {
         shown: bridge.notificationsShown,

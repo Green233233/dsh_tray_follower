@@ -1,22 +1,24 @@
 'use strict'
 
-const { STATUS_GLYPHS, PENDING_STATUSES, LIMITS, stringsFor } = require('./constants.cjs')
-const { sanitizeLabel } = require('./util.cjs')
+const { STATUS_GLYPHS, PENDING_STATUSES, DEFAULT_OPTIONS, LIMITS, stringsFor } = require('./constants.cjs')
+const { sanitizeLabel, isPlainObject } = require('./util.cjs')
 
 /**
  * Build the "conversation status" menu section as plain, JSON-serializable
  * descriptors. Keeping the model free of Electron objects makes the tray menu
  * unit-testable without launching the GUI.
  *
- * Real DSH profiles carry lots of idle historical sessions, so the menu is kept
- * brief:
- *   - sessions are sorted by attention priority: waiting-approval / waiting-choice
- *     / waiting-input, then running, then completed / failed, then idle;
- *   - at most LIMITS.maxActiveSessionsPerWorkspace active rows are listed inline,
- *     followed by a disabled "… 还有 N 个会话" overflow row;
- *   - idle sessions are collapsed into one "空闲会话 (N)" submenu (up to
- *     LIMITS.maxIdleSessionsPerWorkspace rows);
- *   - every workspace header carries its own 运行/待处理 counts.
+ * Behavior is driven by the contract-v2 `options.tray` settings published by the
+ * host plugin (v1 state files without `options` behave like the defaults):
+ *   - `showIdle === false` (default): idle conversations are NOT rendered at all —
+ *     no idle rows and no "空闲会话 (N)" submenu;
+ *   - `showIdle === true`: idle sessions are collapsed into one submenu (up to
+ *     LIMITS.maxIdleSessionsPerWorkspace rows) instead of inline rows;
+ *   - `maxSessionsPerWorkspace` (1..20, default 6) caps the inline active rows
+ *     (waiting / running / completed / failed), followed by a disabled
+ *     "… 还有 N 个会话" overflow row;
+ *   - `showHeaderCounts === false`: the global header omits the counts (`对话`);
+ *   - `showFooter === false`: no version footer row.
  *
  * Descriptor shapes:
  *   { kind: 'header', label, enabled: false }
@@ -25,13 +27,58 @@ const { sanitizeLabel } = require('./util.cjs')
  *   { kind: 'idle-group', label, enabled: true, submenu: [descriptor...] }
  *   { kind: 'placeholder', label, enabled: false }
  *   { kind: 'footer', label, enabled: false }
+ */
+
+function clampMaxSessionsPerWorkspace(value) {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_OPTIONS.tray.maxSessionsPerWorkspace
+  return Math.min(
+    LIMITS.maxSessionsPerWorkspaceOption,
+    Math.max(LIMITS.minSessionsPerWorkspaceOption, Math.round(parsed))
+  )
+}
+
+/**
+ * Resolve the effective tray settings for this render.
  *
+ * `buildStatusSection` options may override the state-published settings (`options.tray`),
+ * which keeps the unit tests self-contained; production always uses the state file.
+ *
+ * @param {object|null} state normalized state
+ * @param {object} [options] buildStatusSection options
+ * @returns {{showIdle: boolean, maxSessionsPerWorkspace: number, showHeaderCounts: boolean, showFooter: boolean}}
+ */
+function resolveTraySettings(state, options = {}) {
+  const defaults = DEFAULT_OPTIONS.tray
+  const published = state && isPlainObject(state.options) && isPlainObject(state.options.tray) ? state.options.tray : null
+  const overrides = isPlainObject(options.tray) ? options.tray : null
+  const readBoolean = (key) => {
+    if (overrides && typeof overrides[key] === 'boolean') return overrides[key]
+    if (published && typeof published[key] === 'boolean') return published[key]
+    return defaults[key]
+  }
+  let maxSessionsPerWorkspace = defaults.maxSessionsPerWorkspace
+  if (overrides && overrides.maxSessionsPerWorkspace !== undefined) {
+    maxSessionsPerWorkspace = clampMaxSessionsPerWorkspace(overrides.maxSessionsPerWorkspace)
+  } else if (published && published.maxSessionsPerWorkspace !== undefined) {
+    maxSessionsPerWorkspace = clampMaxSessionsPerWorkspace(published.maxSessionsPerWorkspace)
+  }
+  return {
+    showIdle: readBoolean('showIdle'),
+    maxSessionsPerWorkspace,
+    showHeaderCounts: readBoolean('showHeaderCounts'),
+    showFooter: readBoolean('showFooter')
+  }
+}
+
+/**
  * @param {object|null} state normalized state (see lib/state.cjs) or null when unavailable
  * @param {object} [options]
  * @param {string} [options.version]
  * @param {string} [options.locale] Electron locale (zh* -> Chinese, else English)
  * @param {boolean} [options.asciiFallback] use "workspace " instead of "📁 "
  * @param {boolean} [options.unavailable]
+ * @param {object} [options.tray] tray-setting overrides (tests; production reads state)
  * @returns {object[]}
  */
 function buildStatusSection(state, options = {}) {
@@ -40,11 +87,13 @@ function buildStatusSection(state, options = {}) {
   const asciiFallback = options.asciiFallback === true
   const workspacePrefix = asciiFallback ? 'workspace ' : '📁 '
   const unavailable = options.unavailable === true || state === null || state === undefined
+  const settings = resolveTraySettings(state, options)
   const stats = state && state.stats && typeof state.stats === 'object' ? state.stats : { running: 0, pending: 0 }
   const running = Number.isFinite(stats.running) ? stats.running : 0
   const pending = Number.isFinite(stats.pending) ? stats.pending : 0
 
-  const section = [{ kind: 'header', label: strings.header(running, pending), enabled: false }]
+  const headerLabel = settings.showHeaderCounts ? strings.header(running, pending) : strings.headerNoCounts
+  const section = [{ kind: 'header', label: headerLabel, enabled: false }]
 
   if (unavailable) {
     section.push({ kind: 'placeholder', label: strings.waitingState, enabled: false })
@@ -62,11 +111,12 @@ function buildStatusSection(state, options = {}) {
       const active = []
       const idle = []
       for (const session of sessions) {
-        if (session && session.status === 'idle') idle.push(session)
-        else if (session) active.push(session)
+        if (!session) continue
+        if (session.status === 'idle') idle.push(session)
+        else active.push(session)
       }
       active.sort((left, right) => sessionPriority(left.status) - sessionPriority(right.status))
-      const visibleActive = active.slice(0, LIMITS.maxActiveSessionsPerWorkspace)
+      const visibleActive = active.slice(0, settings.maxSessionsPerWorkspace)
 
       const children = []
       for (const session of visibleActive) {
@@ -79,7 +129,8 @@ function buildStatusSection(state, options = {}) {
         children.push({ kind: 'placeholder', label: strings.overflow(hiddenActive), enabled: false })
       }
 
-      if (idle.length > 0) {
+      // Idle history is hidden unless the user explicitly enables it in settings.
+      if (settings.showIdle === true && idle.length > 0) {
         const idleRows = []
         const visibleIdle = idle.slice(0, LIMITS.maxIdleSessionsPerWorkspace)
         for (const session of visibleIdle) {
@@ -110,7 +161,9 @@ function buildStatusSection(state, options = {}) {
     }
   }
 
-  section.push({ kind: 'footer', label: strings.footer(version), enabled: false })
+  if (settings.showFooter === true) {
+    section.push({ kind: 'footer', label: strings.footer(version), enabled: false })
+  }
   return section
 }
 
@@ -210,6 +263,7 @@ module.exports = {
   menuSignature,
   describeSection,
   toElectronTemplate,
+  resolveTraySettings,
   sessionPriority,
   countWorkspaceSessions
 }

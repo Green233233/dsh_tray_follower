@@ -16,17 +16,20 @@
  * - every DSH listener body is wrapped: a plugin bug must never escape into the
  *   DSH event loop;
  * - state writes are atomic (tmp + rename) and coalesced for ≤250 ms;
- * - nothing here depends on `@deepseek-ai/*`: only node builtins and the
- *   injected Cordis services;
+ * - the only non-builtin dependency is `@deepseek-ai/schemastery`, used to
+ *   declare the settings-page Config (docs/DESIGN.md §4.1);
  * - on unload the last state is flushed and the file is left in place (the
  *   bridge decides how to treat a stale `updatedAt`).
  */
+import z from '@deepseek-ai/schemastery'
 import {
   ATTENTION_NOTIFY_DELAY_MS,
+  SETTINGS_POLL_INTERVAL_MS,
   STATE_DEBOUNCE_MS,
   TICK_INTERVAL_MS,
 } from './lib/constants.js'
 import { resolveDataDir, stateFilePath } from './lib/paths.js'
+import { defaultOptions, resolveSettings, sameOptions } from './lib/settings.js'
 import { buildStateDocument } from './lib/state.js'
 import { StateWriter } from './lib/state-writer.js'
 import { createStrings, normalizeLanguage } from './lib/strings.js'
@@ -38,14 +41,53 @@ export const name = 'dsh-tray-follower'
 /** Hard dependency: without the agent registry nothing can be tracked. */
 export const inject = ['agents']
 
+/**
+ * Settings-page fields (docs/DESIGN.md §4.1).
+ *
+ * Every field is `.volatile()`: saving an edit in the DSH settings page
+ * updates the live reference in place instead of restarting the plugin, and
+ * the Host re-reads it on every publication through `resolveSettings()`.
+ * Defaults here must stay in sync with `lib/settings.js`.
+ */
+export const Config = z.object({
+  showIdle: z.boolean().default(false)
+    .description('Show idle conversations in the tray menu / 托盘菜单也列出空闲会话')
+    .volatile(),
+  maxSessionsPerWorkspace: z.number().min(1).max(20).default(6)
+    .description('Max conversations listed per workspace / 每个工作区最多列出几个会话')
+    .volatile(),
+  showHeaderCounts: z.boolean().default(true)
+    .description('Show running/pending counts in the menu header / 菜单顶部显示运行中、待处理计数')
+    .volatile(),
+  showFooter: z.boolean().default(true)
+    .description('Show the version footer at the bottom of the menu / 菜单底部显示版本页脚')
+    .volatile(),
+  notifyOnCompleted: z.boolean().default(true)
+    .description('Notify when a conversation completes or stops / 会话完成或停止时通知')
+    .volatile(),
+  notifyOnFailed: z.boolean().default(true)
+    .description('Notify when a conversation fails / 会话失败时通知')
+    .volatile(),
+  notifyOnAttention: z.boolean().default(true)
+    .description('Notify when an approval or answer is needed / 需要你批准或回答时通知')
+    .volatile(),
+  suppressWhenFocused: z.boolean().default(true)
+    .description('Do not notify while the DSH window is focused / DSH 窗口在前台时不打扰')
+    .volatile(),
+  notificationSound: z.boolean().default(true)
+    .description('Play a sound with notifications / 通知带提示音')
+    .volatile(),
+})
+
 const LOG_PREFIX = '[dsh-tray-follower]'
 
 /**
  * Plugin entry. Never throws: a failure to start is logged and the row stays
  * inert instead of breaking the Host boot.
  * @param {any} ctx Cordis plugin context
+ * @param {any} [config] parsed row Config (volatile fields are references)
  */
-export function apply(ctx) {
+export function apply(ctx, config) {
   let logger
   try {
     logger = createLogger(ctx)
@@ -53,7 +95,7 @@ export function apply(ctx) {
     logger = console
   }
   try {
-    activate(ctx, logger)
+    activate(ctx, logger, config)
   } catch (error) {
     safeWarn(logger, `${LOG_PREFIX} activation failed:`, error)
   }
@@ -63,8 +105,9 @@ export function apply(ctx) {
  * Wire services, events, timers and the state writer.
  * @param {any} ctx
  * @param {{ warn: (...args: any[]) => void, info: (...args: any[]) => void }} logger
+ * @param {any} [config]
  */
-function activate(ctx, logger) {
+function activate(ctx, logger, config) {
   const now = () => Date.now()
   const language = resolveLanguage()
   const strings = createStrings(language)
@@ -85,6 +128,21 @@ function activate(ctx, logger) {
   const attentionTimers = new Set()
   /** @type {ReturnType<typeof setInterval> | undefined} */
   let tickTimer
+  /** @type {ReturnType<typeof setInterval> | undefined} */
+  let settingsTimer
+
+  /**
+   * Read the live `options` snapshot from the volatile Config. Never throws:
+   * if a config read fails the state file still publishes defaults.
+   * @returns {ReturnType<typeof defaultOptions>}
+   */
+  function readOptions() {
+    try {
+      return resolveSettings(config)
+    } catch {
+      return defaultOptions()
+    }
+  }
 
   /** Read the published state document from live services. @returns {any} */
   function currentDocument() {
@@ -95,6 +153,7 @@ function activate(ctx, logger) {
       hostPid: process.pid,
       now: now(),
       strings,
+      options: readOptions(),
     })
   }
 
@@ -254,6 +313,23 @@ function activate(ctx, logger) {
   // activation even before the first event arrives.
   buildStateNow()
 
+  // ---- live settings ------------------------------------------------------
+  // Volatile Config edits update the references in place; poll them so a save
+  // in the settings page reaches state.json within ~1 s (docs/DESIGN.md §4.1)
+  // instead of waiting for the next conversation event or the 5 s tick.
+  let publishedOptions = readOptions()
+  settingsTimer = setInterval(() => {
+    try {
+      const nextOptions = readOptions()
+      if (sameOptions(nextOptions, publishedOptions)) return
+      publishedOptions = nextOptions
+      writer.writeNow(currentDocument())
+    } catch (error) {
+      safeWarn(logger, `${LOG_PREFIX} live settings update failed:`, error)
+    }
+  }, SETTINGS_POLL_INTERVAL_MS)
+  unrefTimer(settingsTimer)
+
   // ---- periodic maintenance ----------------------------------------------
   tickTimer = setInterval(() => {
     try {
@@ -269,6 +345,11 @@ function activate(ctx, logger) {
   const dispose = () => {
     try {
       if (tickTimer !== undefined) clearInterval(tickTimer)
+    } catch {
+      // Ignore.
+    }
+    try {
+      if (settingsTimer !== undefined) clearInterval(settingsTimer)
     } catch {
       // Ignore.
     }

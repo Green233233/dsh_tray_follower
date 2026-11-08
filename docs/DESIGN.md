@@ -46,16 +46,20 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-## 4. 状态文件契约（v1）
+## 4. 状态文件契约（v2）
 
 路径：`%LOCALAPPDATA%\dsh-tray-follower\state.json`（`DSH_TRAY_FOLLOWER_DIR` 可覆盖）。
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "updatedAt": 1730000000000,
   "hostPid": 1234,
   "webOrigin": "http://127.0.0.1:61983",
+  "options": {
+    "tray": { "showIdle": false, "maxSessionsPerWorkspace": 6, "showHeaderCounts": true, "showFooter": true },
+    "notifications": { "notifyOnCompleted": true, "notifyOnFailed": true, "notifyOnAttention": true, "suppressWhenFocused": true, "notificationSound": true }
+  },
   "workspaces": [
     {
       "id": "ws_...",
@@ -88,6 +92,24 @@
 ```
 
 事件消费：桥接读取后不删除文件（避免竞态）；桥接以 `state.updatedAt` + 事件 `id` 去重，并记录自己的游标到自己的数据目录。
+
+### 4.1 用户在 DSH 设置中可调的选项（v2 新增）
+
+Host 插件用 `Config`（`@deepseek-ai/schemastery`，全部 `.volatile()`）声明下列字段；Host 每次写状态文件时读取**实时值**（`config[k].get()`），因此设置页保存后 ≤1s 生效，无需重启 DSH。Client 半在 **设置 → 托盘跟随** 注册页面，通过 `ctx.configForms.get('dsh-tray-follower')` 读写同一份 Config。
+
+| 字段 | 类型/默认 | 分组 | 作用 |
+|---|---|---|---|
+| `showIdle` | boolean / `false` | 托盘右键菜单 | 是否在托盘菜单中显示 `idle` 会话（默认关闭：空闲对话不出现） |
+| `maxSessionsPerWorkspace` | number 1–20 / `6` | 托盘右键菜单 | 每个工作区最多内联显示的行数（超出显示"还有 N 个会话"） |
+| `showHeaderCounts` | boolean / `true` | 托盘右键菜单 | 顶部标题是否显示"运行 N / 待处理 M"计数 |
+| `showFooter` | boolean / `true` | 托盘右键菜单 | 是否显示版本页脚 |
+| `notifyOnCompleted` | boolean / `true` | 通知 | 会话完成/停止时发通知（`completed` 事件） |
+| `notifyOnFailed` | boolean / `true` | 通知 | 会话失败时发通知（`failed` 事件） |
+| `notifyOnAttention` | boolean / `true` | 通知 | 需要人工介入时发通知（`needs-attention` 事件） |
+| `suppressWhenFocused` | boolean / `true` | 通知 | DSH 前台聚焦时不打扰 |
+| `notificationSound` | boolean / `true` | 通知 | 通知是否带提示音 |
+
+桥接必须同时兼容 v1 状态文件（缺 `options` 时全部按上表默认值处理）。
 
 ## 5. 取舍
 

@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, inject, name, resolveLanguage, sanitizeOrigin } from '../index.js'
+import { SETTINGS_POLL_INTERVAL_MS } from '../lib/constants.js'
 import { validateStateDocument } from '../lib/state.js'
 
 const NOW = () => Date.now()
@@ -91,6 +92,19 @@ function readState(dir) {
   return JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
 }
 
+/** Config double: volatile fields are `.get()` references, like schemastery. */
+function liveConfig(values) {
+  const current = { ...values }
+  const config = {}
+  for (const key of Object.keys(current)) config[key] = { get: () => current[key] }
+  return {
+    config,
+    set(key, value) {
+      current[key] = value
+    },
+  }
+}
+
 test('bundle identity exports', () => {
   assert.equal(name, 'dsh-tray-follower')
   assert.deepEqual(inject, ['agents'])
@@ -133,9 +147,19 @@ test('apply() publishes the contract and follows synthetic DSH events', async ()
     // The initial snapshot is written synchronously at activation.
     const initial = readState(dir)
     assert.ok(validateStateDocument(initial).ok, JSON.stringify(validateStateDocument(initial).errors))
-    assert.equal(initial.schemaVersion, 1)
+    assert.equal(initial.schemaVersion, 2)
     assert.equal(initial.hostPid, process.pid)
     assert.equal(initial.webOrigin, 'http://127.0.0.1:61983')
+    assert.deepEqual(initial.options, {
+      tray: { showIdle: false, maxSessionsPerWorkspace: 6, showHeaderCounts: true, showFooter: true },
+      notifications: {
+        notifyOnCompleted: true,
+        notifyOnFailed: true,
+        notifyOnAttention: true,
+        suppressWhenFocused: true,
+        notificationSound: true,
+      },
+    })
     assert.equal(initial.workspaces.length, 1)
     assert.equal(initial.workspaces[0].id, 'ws_1')
     assert.equal(initial.workspaces[0].sessions[0].id, 'session-1')
@@ -192,6 +216,72 @@ test('apply() publishes the contract and follows synthetic DSH events', async ()
     const final = readState(dir)
     assert.ok(validateStateDocument(final).ok)
     assert.equal(final.workspaces.length, 1)
+    assert.deepEqual(ctx.warnings(), [])
+  } finally {
+    if (previous.dir === undefined) delete process.env.DSH_TRAY_FOLLOWER_DIR
+    else process.env.DSH_TRAY_FOLLOWER_DIR = previous.dir
+    if (previous.lang === undefined) delete process.env.DSH_TRAY_FOLLOWER_LANG
+    else process.env.DSH_TRAY_FOLLOWER_LANG = previous.lang
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('apply() publishes live Config options and republishes them without a restart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-tray-settings-'))
+  const previous = {
+    dir: process.env.DSH_TRAY_FOLLOWER_DIR,
+    lang: process.env.DSH_TRAY_FOLLOWER_LANG,
+  }
+  process.env.DSH_TRAY_FOLLOWER_DIR = dir
+  process.env.DSH_TRAY_FOLLOWER_LANG = 'en'
+
+  const live = liveConfig({
+    showIdle: true,
+    maxSessionsPerWorkspace: 12,
+    showHeaderCounts: false,
+    showFooter: false,
+    notifyOnCompleted: false,
+    notifyOnFailed: true,
+    notifyOnAttention: false,
+    suppressWhenFocused: false,
+    notificationSound: false,
+  })
+  const ctx = new FakeCtx({ agents: [], workspaces: [] })
+  try {
+    apply(ctx, live.config)
+
+    const initial = readState(dir)
+    assert.ok(validateStateDocument(initial).ok, JSON.stringify(validateStateDocument(initial).errors))
+    assert.equal(initial.schemaVersion, 2)
+    assert.deepEqual(initial.options, {
+      tray: { showIdle: true, maxSessionsPerWorkspace: 12, showHeaderCounts: false, showFooter: false },
+      notifications: {
+        notifyOnCompleted: false,
+        notifyOnFailed: true,
+        notifyOnAttention: false,
+        suppressWhenFocused: false,
+        notificationSound: false,
+      },
+    })
+
+    // A volatile edit updates the references in place. No new conversation
+    // event arrives; the 1 s settings watcher must still republish the file.
+    live.set('showIdle', false)
+    live.set('notifyOnAttention', true)
+    await sleep(SETTINGS_POLL_INTERVAL_MS + 400)
+    const updated = readState(dir)
+    assert.ok(validateStateDocument(updated).ok)
+    assert.equal(updated.options.tray.showIdle, false)
+    assert.equal(updated.options.tray.maxSessionsPerWorkspace, 12)
+    assert.equal(updated.options.notifications.notifyOnAttention, true)
+    assert.equal(updated.options.notifications.notifyOnCompleted, false)
+
+    // Teardown stops the watcher: later edits no longer touch the file.
+    ctx.dispose()
+    const frozen = readState(dir)
+    live.set('showIdle', true)
+    await sleep(300)
+    assert.deepEqual(readState(dir), frozen)
     assert.deepEqual(ctx.warnings(), [])
   } finally {
     if (previous.dir === undefined) delete process.env.DSH_TRAY_FOLLOWER_DIR
