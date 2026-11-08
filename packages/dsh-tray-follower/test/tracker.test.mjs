@@ -105,6 +105,31 @@ test('repeated approvals for the same tool each notify once', () => {
   assert.notEqual(tracker.unreadEvents()[0].id, tracker.unreadEvents()[1].id)
 })
 
+test('attention ids stay unique across a Host restart (occurrence counter resets)', () => {
+  const first = makeTracker()
+  const firstSession = makeSession()
+  first.tracker.observeAgent({ id: firstSession.id, session: firstSession, status: 'running' })
+  first.tracker.beginApprovalWait({ agent: { id: firstSession.id, session: firstSession }, toolName: 'bash', reason: 'first?' })
+  first.tracker.takePublications()
+  assert.equal(first.tracker.publishAttention('session-1', 'approval:bash'), true)
+  const firstId = first.tracker.unreadEvents()[0].id
+
+  // Simulate a Host restart / plugin reload: the fresh tracker's per-process
+  // occurrence counter starts at 1 again, but the wait happens at a later ms.
+  const second = makeTracker()
+  second.advance(5_000)
+  const secondSession = makeSession()
+  second.tracker.observeAgent({ id: secondSession.id, session: secondSession, status: 'running' })
+  second.tracker.beginApprovalWait({ agent: { id: secondSession.id, session: secondSession }, toolName: 'bash', reason: 'second?' })
+  second.tracker.takePublications()
+  assert.equal(second.tracker.publishAttention('session-1', 'approval:bash'), true)
+  const secondId = second.tracker.unreadEvents()[0].id
+
+  // The bridge persists seen ids across DSH restarts; a collision here means a
+  // real "action needed" notification is silently dropped after a restart.
+  assert.notEqual(firstId, secondId)
+})
+
 test('turn/start clears a completed status back to running', () => {
   const { tracker } = makeTracker()
   const session = makeSession()

@@ -603,7 +603,11 @@ export class SessionTracker {
     if (wait === undefined) return false
     // One stable id per wait occurrence: re-publishing the same wait is
     // deduplicated, while a later approval for the same tool notifies again.
-    const id = stableEventId('attention', entry.id, wait.kind, wait.occurrence)
+    // `wait.at` is essential: `occurrence` is a per-process counter that resets
+    // when the Host restarts (or the plugin is reloaded), so without a real
+    // timestamp a later wait with the same ordinal would reuse an id the bridge
+    // has already marked as seen and the notification would be silently lost.
+    const id = stableEventId('attention', entry.id, wait.kind, wait.occurrence, wait.at)
     const added = this._addUnread(entry, 'needs-attention', {
       id,
       title: this.strings.text('attentionTitle'),

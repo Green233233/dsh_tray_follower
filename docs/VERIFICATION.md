@@ -83,7 +83,17 @@ node tools/install-bridge.mjs --apply
 | 菜单随真实数据刷新 | PASS；`menu-rebuilt` 持续出现，真实数据从 workspaces=1/sessions=5 → workspaces=2/sessions=4/running=2 变化，`applied:1` 无错误 |
 | 真实托盘点击（用户操作） | PASS；`bridge.log` 记录两次 `window-focused {"actions":["focus"]}` + `focus-request {"reason":"tray-session","ok":true}`（08:18:20、08:20:15），说明用户右键托盘后点击了会话行，桥接成功聚焦 DSH 窗口 |
 | 安全收尾 | PASS；`inspector-close-scheduled` → `inspector-closed`（9531 端口已不可连接）；心跳 `bridge.json` 每 5s 刷新 |
-| 通知（真实实例） | 待验证：需 DSH 最小化/失焦时出现新的完成或需要人工事件；当前用户一直聚焦 DSH，桥接按设计不打扰。下次轮次检查 `bridge.log` 的 `notification-shown` / `notification-suppressed` 即可确认 |
+| 通知 — 需要人工介入（真实实例） | **PASS**；2026-11-08 08:27:11 用户将 DSH 最小化后触发一次提问，`bridge.log` 记录 `notification-shown {"kind":"single","title":"需要你的操作"}` + `notification-batch {"shown":1,"focused":false,"visible":false}`，用户反馈「收到通知（我从通知点回来的）」，窗口被通知点击恢复（可见、非最小化、前台=DSH） |
+| 通知 — 正在看 DSH 时不打扰 | PASS；08:21:09 完成事件在窗口聚焦时记录 `notification-suppressed {"reason":"focused","count":1}` |
+| 通知 — 完成/停止（真实实例） | 与上同一 Electron Notification 通道、同一策略（`kind=completed`）；隔离 E2E 已验证 `notification-shown` 路径，真实实例的完成事件在聚焦时按设计被抑制 |
+
+### 4.1 真实验证中发现并修复的缺陷
+
+**现象**：第一次真实通知测试时用户没有收到通知，`bridge.log` 无任何 notification 记录。
+
+**根因**：Host 插件为 `needs-attention` 事件生成 id 时使用 `stableEventId('attention', sessionId, kind, occurrence)`，其中 `occurrence` 是**进程内**自增计数器。DSH 重启（或插件重新加载）后计数器从 1 重新开始，同一会话的下一次等待会生成与上次完全相同的 id；bridge 的持久化 `seenEventIds` 已包含该 id，于是事件被当成“已读”直接丢弃，通知被静默吞掉。
+
+**修复**：`packages/dsh-tray-follower/lib/tracker.js#publishAttention` 的 id 加入 `wait.at`（等待创建的真实时间戳，同一等待重发时稳定，跨重启必不相同），并新增回归测试 `attention ids stay unique across a Host restart (occurrence counter resets)`；插件通过插件管理器 bundle 关闭/开启完成热重载，无需重启 DSH。修复后新事件 id 为 `evt_54b43d150277886142b7`（与旧 id 不同），通知正常弹出。
 
 ## 5. 已执行的安全/回滚检查
 
