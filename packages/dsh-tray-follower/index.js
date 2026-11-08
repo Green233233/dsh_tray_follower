@@ -3,11 +3,14 @@
  *
  * Tracks every top-level DSH conversation (per workspace) and publishes the
  * state contract from docs/DESIGN.md §4 to
- * `<DSH_TRAY_FOLLOWER_DIR or %LOCALAPPDATA%\dsh-tray-follower>\state.json`,
- * where the DSH Desktop shell bridge reads it to build the tray menu and fire
- * native notifications. When that bridge is not running (heartbeat
- * `bridge.json` missing or older than 15 s) the Host raises Windows toasts
- * itself through PowerShell/WinRT as a degraded fallback.
+ * `<DSH_TRAY_FOLLOWER_DIR or %LOCALAPPDATA%\dsh-tray-follower>\state.json`.
+ * The DSH Desktop shell bridge is the ONLY consumer that shows notifications:
+ * it reads this file, builds the tray menu, and raises native Electron
+ * notifications in DSH's own name while the window is hidden or unfocused.
+ *
+ * This plugin never shows an OS notification itself. Without the bridge it
+ * still publishes state (the tray/notification feature needs the bridge); no
+ * external helper process or shell command is used here.
  *
  * Design rules enforced here:
  * - every DSH listener body is wrapped: a plugin bug must never escape into the
@@ -18,16 +21,12 @@
  * - on unload the last state is flushed and the file is left in place (the
  *   bridge decides how to treat a stale `updatedAt`).
  */
-import { bridgeAvailable } from './lib/bridge.js'
 import {
   ATTENTION_NOTIFY_DELAY_MS,
-  BRIDGE_STALE_MS,
   STATE_DEBOUNCE_MS,
   TICK_INTERVAL_MS,
-  TOAST_MIN_INTERVAL_MS,
 } from './lib/constants.js'
-import { sendToast } from './lib/fallback-toast.js'
-import { bridgeHeartbeatPath, resolveDataDir, stateFilePath } from './lib/paths.js'
+import { resolveDataDir, stateFilePath } from './lib/paths.js'
 import { buildStateDocument } from './lib/state.js'
 import { StateWriter } from './lib/state-writer.js'
 import { createStrings, normalizeLanguage } from './lib/strings.js'
@@ -70,13 +69,11 @@ function activate(ctx, logger) {
   const language = resolveLanguage()
   const strings = createStrings(language)
   const dataDir = resolveDataDir()
-  const heartbeatPath = bridgeHeartbeatPath(dataDir)
   const writer = new StateWriter({
     filePath: stateFilePath(dataDir),
     debounceMs: STATE_DEBOUNCE_MS,
     logger,
   })
-  const notificationsEnabled = readNotificationsEnabled()
 
   const tracker = new SessionTracker({
     now,
@@ -88,11 +85,6 @@ function activate(ctx, logger) {
   const attentionTimers = new Set()
   /** @type {ReturnType<typeof setInterval> | undefined} */
   let tickTimer
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let toastTimer
-  /** @type {any | undefined} */
-  let queuedToast
-  let lastToastAt = 0
 
   /** Read the published state document from live services. @returns {any} */
   function currentDocument() {
@@ -124,60 +116,10 @@ function activate(ctx, logger) {
     }
   }
 
-  /** True when the desktop bridge heartbeat is missing or stale. */
-  function bridgeAbsent() {
-    try {
-      return !bridgeAvailable(heartbeatPath, { now: now(), maxAgeMs: BRIDGE_STALE_MS }).available
-    } catch {
-      return true
-    }
-  }
-
   /**
-   * Queue a fallback toast; only one toast is emitted per
-   * TOAST_MIN_INTERVAL_MS and only while the bridge is absent.
-   * @param {any} event unread event
-   */
-  function queueToast(event) {
-    if (!notificationsEnabled) return
-    queuedToast = event
-    scheduleToast()
-  }
-
-  function scheduleToast() {
-    if (queuedToast === undefined) return
-    const elapsed = now() - lastToastAt
-    const wait = Math.max(0, TOAST_MIN_INTERVAL_MS - elapsed)
-    if (wait > 0) {
-      if (toastTimer !== undefined) return
-      toastTimer = setTimeout(() => {
-        toastTimer = undefined
-        scheduleToast()
-      }, wait)
-      unrefTimer(toastTimer)
-      return
-    }
-    const event = queuedToast
-    queuedToast = undefined
-    // Re-check at send time: the bridge may have started while we waited.
-    if (!bridgeAbsent()) return
-    lastToastAt = now()
-    try {
-      sendToast({
-        title: event?.title,
-        body: event?.body,
-        eventId: event?.id,
-        webOrigin: readWebOrigin(ctx),
-      }).catch(() => {})
-    } catch (error) {
-      safeWarn(logger, `${LOG_PREFIX} fallback toast failed:`, error)
-    }
-  }
-
-  /**
-   * Arm the delayed "needs attention" publication for waits created by the
-   * waterfall listeners. The delay keeps an instantly answered approval or an
-   * auto-answered question from producing a notification.
+   * Arm the delayed "needs attention" unread-event publication for waits
+   * created by the waterfall listeners. The delay keeps an instantly answered
+   * approval or an auto-answered question from becoming a bridge notification.
    */
   function flushPublications() {
     let queued
@@ -200,18 +142,15 @@ function activate(ctx, logger) {
     }
   }
 
-  // ---- projection → state file / fallback notifications -------------------
+  // ---- projection → state file -------------------------------------------
+  // Unread events are published for the desktop bridge, which owns the actual
+  // notification. The plugin itself has no OS-notification path.
   tracker.onChange(scheduleWrite)
-  tracker.onUnread((event) => {
+  tracker.onUnread(() => {
     try {
       scheduleWrite()
     } catch {
       // scheduleWrite already guards.
-    }
-    try {
-      queueToast(event)
-    } catch (error) {
-      safeWarn(logger, `${LOG_PREFIX} notification failed:`, error)
     }
   })
 
@@ -342,11 +281,6 @@ function activate(ctx, logger) {
     }
     attentionTimers.clear()
     try {
-      if (toastTimer !== undefined) clearTimeout(toastTimer)
-    } catch {
-      // Ignore.
-    }
-    try {
       writer.writeNow(currentDocument())
     } catch {
       // The state file is best-effort on unload.
@@ -459,12 +393,6 @@ export function resolveLanguage(env = process.env) {
   }
 }
 
-/** @returns {boolean} */
-function readNotificationsEnabled(env = process.env) {
-  const value = typeof env.DSH_TRAY_FOLLOWER_NOTIFY === 'string' ? env.DSH_TRAY_FOLLOWER_NOTIFY.trim().toLowerCase() : ''
-  return value !== '0' && value !== 'off' && value !== 'false'
-}
-
 /**
  * Read the workspace registry projection used for grouping.
  * @param {any} ctx
@@ -570,8 +498,8 @@ function readGoal(ctx, agent) {
 }
 
 /**
- * The Web GUI origin advertised by the running Host, used by the bridge (and
- * by fallback toast protocol activation when the desktop app is absent).
+ * The Web GUI origin advertised by the running Host. Published as `webOrigin`
+ * in the state contract so the desktop bridge can open/focus the app.
  * @param {any} ctx
  * @returns {string}
  */

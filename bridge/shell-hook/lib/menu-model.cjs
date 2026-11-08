@@ -1,0 +1,215 @@
+'use strict'
+
+const { STATUS_GLYPHS, PENDING_STATUSES, LIMITS, stringsFor } = require('./constants.cjs')
+const { sanitizeLabel } = require('./util.cjs')
+
+/**
+ * Build the "conversation status" menu section as plain, JSON-serializable
+ * descriptors. Keeping the model free of Electron objects makes the tray menu
+ * unit-testable without launching the GUI.
+ *
+ * Real DSH profiles carry lots of idle historical sessions, so the menu is kept
+ * brief:
+ *   - sessions are sorted by attention priority: waiting-approval / waiting-choice
+ *     / waiting-input, then running, then completed / failed, then idle;
+ *   - at most LIMITS.maxActiveSessionsPerWorkspace active rows are listed inline,
+ *     followed by a disabled "… 还有 N 个会话" overflow row;
+ *   - idle sessions are collapsed into one "空闲会话 (N)" submenu (up to
+ *     LIMITS.maxIdleSessionsPerWorkspace rows);
+ *   - every workspace header carries its own 运行/待处理 counts.
+ *
+ * Descriptor shapes:
+ *   { kind: 'header', label, enabled: false }
+ *   { kind: 'workspace', label, enabled: true, submenu: [descriptor...] }
+ *   { kind: 'session', label, enabled: true, focus: true }
+ *   { kind: 'idle-group', label, enabled: true, submenu: [descriptor...] }
+ *   { kind: 'placeholder', label, enabled: false }
+ *   { kind: 'footer', label, enabled: false }
+ *
+ * @param {object|null} state normalized state (see lib/state.cjs) or null when unavailable
+ * @param {object} [options]
+ * @param {string} [options.version]
+ * @param {string} [options.locale] Electron locale (zh* -> Chinese, else English)
+ * @param {boolean} [options.asciiFallback] use "workspace " instead of "📁 "
+ * @param {boolean} [options.unavailable]
+ * @returns {object[]}
+ */
+function buildStatusSection(state, options = {}) {
+  const version = typeof options.version === 'string' && options.version ? options.version : '0.0.0'
+  const strings = stringsFor(options.locale)
+  const asciiFallback = options.asciiFallback === true
+  const workspacePrefix = asciiFallback ? 'workspace ' : '📁 '
+  const unavailable = options.unavailable === true || state === null || state === undefined
+  const stats = state && state.stats && typeof state.stats === 'object' ? state.stats : { running: 0, pending: 0 }
+  const running = Number.isFinite(stats.running) ? stats.running : 0
+  const pending = Number.isFinite(stats.pending) ? stats.pending : 0
+
+  const section = [{ kind: 'header', label: strings.header(running, pending), enabled: false }]
+
+  if (unavailable) {
+    section.push({ kind: 'placeholder', label: strings.waitingState, enabled: false })
+  } else if (!Array.isArray(state.workspaces) || state.workspaces.length === 0) {
+    section.push({ kind: 'placeholder', label: strings.noWorkspaces, enabled: false })
+  } else {
+    for (const workspace of state.workspaces) {
+      const workspaceTitle = sanitizeLabel(
+        workspace.title || workspace.path || workspace.id,
+        LIMITS.workspaceTitleChars,
+        strings.unknownWorkspace
+      )
+      const sessions = Array.isArray(workspace.sessions) ? workspace.sessions : []
+      const counts = countWorkspaceSessions(sessions)
+      const active = []
+      const idle = []
+      for (const session of sessions) {
+        if (session && session.status === 'idle') idle.push(session)
+        else if (session) active.push(session)
+      }
+      active.sort((left, right) => sessionPriority(left.status) - sessionPriority(right.status))
+      const visibleActive = active.slice(0, LIMITS.maxActiveSessionsPerWorkspace)
+
+      const children = []
+      for (const session of visibleActive) {
+        const glyph = glyphFor(session.status)
+        const sessionTitle = sanitizeLabel(session.title || session.id, LIMITS.sessionTitleChars, strings.unknownSession)
+        children.push({ kind: 'session', label: `${glyph} ${sessionTitle}`, enabled: true, focus: true })
+      }
+      const hiddenActive = active.length - visibleActive.length
+      if (hiddenActive > 0) {
+        children.push({ kind: 'placeholder', label: strings.overflow(hiddenActive), enabled: false })
+      }
+
+      if (idle.length > 0) {
+        const idleRows = []
+        const visibleIdle = idle.slice(0, LIMITS.maxIdleSessionsPerWorkspace)
+        for (const session of visibleIdle) {
+          const idleTitle = sanitizeLabel(session.title || session.id, LIMITS.sessionTitleChars, strings.unknownSession)
+          idleRows.push({ kind: 'session', label: `${STATUS_GLYPHS.idle} ${idleTitle}`, enabled: true, focus: true })
+        }
+        const hiddenIdle = idle.length - visibleIdle.length
+        if (hiddenIdle > 0) {
+          idleRows.push({ kind: 'placeholder', label: strings.overflow(hiddenIdle), enabled: false })
+        }
+        children.push({
+          kind: 'idle-group',
+          label: strings.idleGroup(idle.length),
+          enabled: true,
+          submenu: idleRows
+        })
+      }
+
+      if (children.length === 0) {
+        children.push({ kind: 'placeholder', label: strings.noSessions, enabled: false })
+      }
+      section.push({
+        kind: 'workspace',
+        label: strings.workspace(workspacePrefix, workspaceTitle, counts.running, counts.pending),
+        enabled: true,
+        submenu: children
+      })
+    }
+  }
+
+  section.push({ kind: 'footer', label: strings.footer(version), enabled: false })
+  return section
+}
+
+/** Attention priority: lower first (waiting 0, running 1, completed/failed 2, idle 3). */
+function sessionPriority(status) {
+  switch (status) {
+    case 'waiting-approval':
+    case 'waiting-choice':
+    case 'waiting-input':
+      return 0
+    case 'running':
+      return 1
+    case 'completed':
+    case 'failed':
+      return 2
+    default:
+      return 3
+  }
+}
+
+function glyphFor(status) {
+  return STATUS_GLYPHS[status] || STATUS_GLYPHS.idle
+}
+
+function countWorkspaceSessions(sessions) {
+  let running = 0
+  let pending = 0
+  for (const session of sessions) {
+    if (!session) continue
+    if (session.status === 'running') running += 1
+    else if (PENDING_STATUSES.includes(session.status)) pending += 1
+  }
+  return { running, pending }
+}
+
+/** Stable signature of a status section; used to avoid rebuilding an identical menu. */
+function menuSignature(section) {
+  try {
+    return JSON.stringify(section)
+  } catch (_error) {
+    return ''
+  }
+}
+
+/** Plain description of a section for diagnostics (never includes functions). */
+function describeSection(section) {
+  if (!Array.isArray(section)) return []
+  return section.map((item) => {
+    if (!item || typeof item !== 'object') return { kind: 'unknown' }
+    const description = {
+      kind: typeof item.kind === 'string' ? item.kind : 'unknown',
+      label: typeof item.label === 'string' ? item.label : '',
+      enabled: item.enabled !== false
+    }
+    if (Array.isArray(item.submenu)) description.submenu = describeSection(item.submenu)
+    return description
+  })
+}
+
+/**
+ * Convert the plain status section into Electron `Menu.buildFromTemplate` items.
+ * Session rows are clickable and focus the main window; headers, placeholders and
+ * the footer stay disabled; workspace and idle-group rows become submenus.
+ *
+ * @param {object[]} section
+ * @param {{focus?: () => void}} [options]
+ */
+function toElectronTemplate(section, options = {}) {
+  const focus = typeof options.focus === 'function' ? options.focus : () => {}
+  const mapItem = (item) => {
+    if (!item || typeof item !== 'object') return null
+    if (item.kind === 'workspace' || item.kind === 'idle-group') {
+      const submenu = Array.isArray(item.submenu) ? item.submenu.map(mapItem).filter(Boolean) : []
+      return { label: item.label, enabled: item.enabled !== false, submenu }
+    }
+    if (item.kind === 'session') {
+      return {
+        label: item.label,
+        enabled: item.enabled !== false,
+        click: () => {
+          try {
+            focus()
+          } catch (_error) {
+            /* never throw from a menu callback */
+          }
+        }
+      }
+    }
+    return { label: item.label, enabled: item.enabled === true }
+  }
+  if (!Array.isArray(section)) return []
+  return section.map(mapItem).filter(Boolean)
+}
+
+module.exports = {
+  buildStatusSection,
+  menuSignature,
+  describeSection,
+  toElectronTemplate,
+  sessionPriority,
+  countWorkspaceSessions
+}

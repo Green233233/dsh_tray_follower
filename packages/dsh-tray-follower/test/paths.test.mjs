@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { posix, win32 } from 'node:path'
 import { homedir } from 'node:os'
-import { resolveDataDir, stateFilePath, bridgeHeartbeatPath, DATA_DIR_ENV } from '../lib/paths.js'
+import { resolveDataDir, stateFilePath, DATA_DIR_ENV } from '../lib/paths.js'
 
 const pjoin = posix.join
 const wjoin = win32.join
@@ -39,12 +39,10 @@ test('resolveDataDir uses XDG_STATE_HOME on POSIX platforms', () => {
   assert.equal(mac, '/Users/u/Library/Application Support/dsh-tray-follower')
 })
 
-test('state and heartbeat paths share the resolved directory', () => {
+test('the state file lives in the resolved directory', () => {
   const dir = resolveDataDir({ env: { [DATA_DIR_ENV]: '/tmp/tray' }, platform: 'linux', homedir: () => '/home/u' })
   assert.equal(stateFilePath(dir), pjoin('/tmp/tray', 'state.json'))
-  assert.equal(bridgeHeartbeatPath(dir), pjoin('/tmp/tray', 'bridge.json'))
 
   const winDir = resolveDataDir({ env: { [DATA_DIR_ENV]: 'C:\\tray' }, platform: 'win32', homedir })
   assert.equal(stateFilePath(winDir), 'C:\\tray\\state.json')
-  assert.equal(bridgeHeartbeatPath(winDir), 'C:\\tray\\bridge.json')
 })

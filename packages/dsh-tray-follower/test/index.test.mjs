@@ -114,11 +114,9 @@ test('apply() publishes the contract and follows synthetic DSH events', async ()
   const previous = {
     dir: process.env.DSH_TRAY_FOLLOWER_DIR,
     lang: process.env.DSH_TRAY_FOLLOWER_LANG,
-    notify: process.env.DSH_TRAY_FOLLOWER_NOTIFY,
   }
   process.env.DSH_TRAY_FOLLOWER_DIR = dir
   process.env.DSH_TRAY_FOLLOWER_LANG = 'en'
-  process.env.DSH_TRAY_FOLLOWER_NOTIFY = '0'
 
   const session = makeSession('session-1')
   const agent = { id: session.id, session, status: 'running' }
@@ -200,8 +198,6 @@ test('apply() publishes the contract and follows synthetic DSH events', async ()
     else process.env.DSH_TRAY_FOLLOWER_DIR = previous.dir
     if (previous.lang === undefined) delete process.env.DSH_TRAY_FOLLOWER_LANG
     else process.env.DSH_TRAY_FOLLOWER_LANG = previous.lang
-    if (previous.notify === undefined) delete process.env.DSH_TRAY_FOLLOWER_NOTIFY
-    else process.env.DSH_TRAY_FOLLOWER_NOTIFY = previous.notify
     rmSync(dir, { recursive: true, force: true })
   }
 })
@@ -210,10 +206,8 @@ test('apply() is inert and quiet when services are missing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-tray-e2e-min-'))
   const previous = {
     dir: process.env.DSH_TRAY_FOLLOWER_DIR,
-    notify: process.env.DSH_TRAY_FOLLOWER_NOTIFY,
   }
   process.env.DSH_TRAY_FOLLOWER_DIR = dir
-  process.env.DSH_TRAY_FOLLOWER_NOTIFY = '0'
   const ctx = new FakeCtx({ agents: [], workspaces: [] })
   try {
     apply(ctx)
@@ -226,8 +220,6 @@ test('apply() is inert and quiet when services are missing', async () => {
   } finally {
     if (previous.dir === undefined) delete process.env.DSH_TRAY_FOLLOWER_DIR
     else process.env.DSH_TRAY_FOLLOWER_DIR = previous.dir
-    if (previous.notify === undefined) delete process.env.DSH_TRAY_FOLLOWER_NOTIFY
-    else process.env.DSH_TRAY_FOLLOWER_NOTIFY = previous.notify
     rmSync(dir, { recursive: true, force: true })
   }
 })

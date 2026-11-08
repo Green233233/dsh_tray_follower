@@ -15,9 +15,6 @@ export const DATA_DIR_ENV = 'DSH_TRAY_FOLLOWER_DIR'
 /** File the Host writes and the desktop bridge reads. */
 export const STATE_FILE_NAME = 'state.json'
 
-/** Heartbeat file the desktop bridge owns (`{ pid, ts, version }`). */
-export const BRIDGE_FILE_NAME = 'bridge.json'
-
 /**
  * Resolve the data directory without touching the filesystem.
  * @param {{
@@ -58,14 +55,6 @@ export function resolveDataDir(options = {}) {
  */
 export function stateFilePath(dataDir) {
   return joinFor(dataDir, STATE_FILE_NAME)
-}
-
-/**
- * @param {string} dataDir
- * @returns {string}
- */
-export function bridgeHeartbeatPath(dataDir) {
-  return joinFor(dataDir, BRIDGE_FILE_NAME)
 }
 
 /**

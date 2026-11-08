@@ -22,14 +22,12 @@ export const SESSION_STATUSES = Object.freeze([
 /** Every kind written into `unreadEvents[].kind`. */
 export const UNREAD_KINDS = Object.freeze(['completed', 'failed', 'needs-attention'])
 
-/** The bridge is considered absent when its heartbeat is older than this. */
-export const BRIDGE_STALE_MS = 15_000
-
 /** State writes are coalesced; the contract requires ≤250 ms. */
 export const STATE_DEBOUNCE_MS = 200
 
-/** A "needs attention" notification is published only after this quiet delay,
- * so an approval/question that is answered instantly never becomes a toast. */
+/** A "needs attention" unread event is published only after this quiet delay,
+ * so an approval/question that is answered instantly never becomes a bridge
+ * notification. */
 export const ATTENTION_NOTIFY_DELAY_MS = 1_200
 
 /** Periodic tick that refreshes `updatedAt` and prunes stale entries. */
@@ -46,9 +44,6 @@ export const MAX_UNREAD_EVENTS = 50
 
 /** Recently seen unread ids kept for de-duplication beyond the published ring. */
 export const MAX_SEEN_UNREAD_IDS = 400
-
-/** Fallback toasts are rate-limited; the newest event wins within the window. */
-export const TOAST_MIN_INTERVAL_MS = 1_500
 
 /** Tray menu ordering: things that need the user come first, idle last. */
 export const STATUS_RANK = Object.freeze({

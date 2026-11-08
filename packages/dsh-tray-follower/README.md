@@ -6,8 +6,11 @@ to a state file. The DSH Desktop **shell bridge** (see `bridge/shell-hook/` in
 the repository) reads that file to build the tray icon's right-click menu and to
 raise native notifications while the window is hidden or unfocused.
 
-The plugin also has a degraded fallback channel: when the bridge heartbeat is
-missing or stale it raises Windows toasts itself through PowerShell/WinRT.
+The plugin publishes state only. **Notifications are emitted exclusively by the
+DSH Desktop shell bridge** (in-process Electron `Notification`, so they appear
+under the DeepSeek Harness name) — the plugin never starts an external notifier
+process (no PowerShell/WinRT/notify-send). Without the bridge the plugin still
+publishes `state.json`, but no tray section and no OS notifications appear.
 
 - Package name / row: `dsh-tray-follower`
 - Host-only bundle (`index.js` exports `name`, `inject`, `apply`); no Client
@@ -101,24 +104,20 @@ An immediately answered approval or question never notifies. A conversation
 that is following an armed goal suppresses its between-round `completed` turns
 and notifies only when the goal itself completes or blocks.
 
-## Fallback notifications
+## Notifications
 
-The preferred channel is the bridge (it knows whether the DSH window is
-focused). The bridge owns `<dataDir>\bridge.json`, contract
-`{ "pid": number, "ts": number, "version": string }`, refreshed regularly.
-The Host sends its own toast only when that heartbeat is absent, malformed,
-more than 15 s old, or clock-skewed:
+Notifications are not sent by this plugin. The DSH Desktop shell bridge (see
+`bridge/`) reads `unreadEvents` from `state.json`, checks the real window
+focus/visibility state, and raises a native notification through the Electron
+main process (`new Notification(...)`), which Windows attributes to DeepSeek
+Harness itself. This matches the product requirement that notifications be sent
+in DSH's own name and that no external PowerShell/WinRT notifier be used.
 
-- Windows: WinRT `ToastGeneric` through
-  `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand`
-  (UTF-16LE base64, so Chinese text and quotes need no shell escaping), filed
-  under the built-in Windows PowerShell AUMID. Clicking it opens `dsh://open`
-  when the Host runs inside DSH Desktop (Electron `RUN_AS_NODE`), else the Web
-  GUI origin when known.
-- Any other platform, or when no PowerShell exists: silent no-op.
-
-Fallback toasts are rate-limited (1 per 1.5 s, newest event wins) and can be
-disabled entirely.
+The bridge suppresses notifications while its window is focused/visible, keeps a
+persistent cursor so events are never replayed, silently baselines existing
+events on first run, and ignores events older than 10 minutes. When the bridge
+is not installed (or injection failed), the Host keeps publishing state and no
+OS notification is raised — a deliberately accepted degraded mode.
 
 ## Configuration (environment only)
 
@@ -128,15 +127,14 @@ There is intentionally no `Config` schema: a plugin Config would need
 | Variable | Default | Meaning |
 |---|---|---|
 | `DSH_TRAY_FOLLOWER_DIR` | `%LOCALAPPDATA%\dsh-tray-follower` (`$XDG_STATE_HOME/dsh-tray-follower`, `~/Library/Application Support/...` elsewhere) | data directory holding `state.json` |
-| `DSH_TRAY_FOLLOWER_LANG` | `DSH_LOCALE`, `LC_ALL`, `LC_MESSAGES`, `LANG`, JS locale → `en` | runtime language for `detail` / notifications (`en`, `zh`) |
-| `DSH_TRAY_FOLLOWER_NOTIFY` | enabled | `0`/`off`/`false` disables the PowerShell fallback toasts |
+| `DSH_TRAY_FOLLOWER_LANG` | `DSH_LOCALE`, `LC_ALL`, `LC_MESSAGES`, `LANG`, JS locale → `en` | runtime language for `detail` (`en`, `zh`) |
 
 ## Bundle contents
 
 ```
 package.json          name, exports (., ./locale/*.json, ./icon), files, dsh.bundle.patch
 cordis.patch.yml      insert row: id dsh-tray-follower, name dsh-tray-follower
-index.js              Host plugin: services, events, timers, state writer, fallback toast
+index.js              Host plugin: services, events, timers, state writer
 lib/                  pure modules (unit-tested with node --test)
 locale/en.json        meta.title "Tray follower" / meta.description
 locale/zh.json        meta.title "托盘跟随者" / meta.description
@@ -167,8 +165,8 @@ node --test "packages/dsh-tray-follower/test/*.test.mjs"
 - Host-only: no Client half, so no settings page; configuration is environment
   only.
 - The Host cannot know whether the DSH window is focused: focus-based
-  suppression is the bridge's job. The fallback toasts may therefore appear
-  even while DSH is focused.
+  suppression is the bridge's job. Without the bridge there is no notification at
+  all (by design — no external notifier process is started).
 - Titles depend on the optional `sessionTitle` service (`sessionTitle.get`) and
   its `session/title` log event; without it the tray falls back to the working
   directory's last segment.
@@ -181,5 +179,5 @@ node --test "packages/dsh-tray-follower/test/*.test.mjs"
   covers tool approvals and questions but not arbitrary non-tool requests.
 - `webOrigin`/bridging assume the desktop shell can read the data directory
   written by the Host process (same user profile).
-- Portability: Windows 10/11 for the fallback toast; elsewhere the plugin still
-  writes the state file but cannot notify without the bridge.
+- Portable: the Host writes the state contract on every platform; tray menu and
+  notifications require the DSH Desktop bridge (Windows-focused in this repo).

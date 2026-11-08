@@ -41,8 +41,8 @@
 │   │  user-questions/request 等事件，维护会话状态机                    │
 │   ├─ 读取 workspaceRegistry + sessions，按工作区分组                  │
 │   ├─ 原子写状态文件（JSON）与事件队列                                │
-│   ├─ 写 bridge 心跳检测；无桥接时用 PowerShell WinRT toast 发通知     │
-│   └─ 无桥接时：托盘扩展不可用，仅通知（降级路径）                      │
+│   └─ 只发布状态；不自行调用任何 OS 通知通道（通知统一由桥接以 DSH     │
+│      应用名义发出；桥接缺失时降级为“无通知”，见 §5）                   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,10 +95,11 @@
 - **为什么不注入渲染进程**：渲染进程拿不到 Electron `Tray` / `Notification` 主进程 API；浏览器 `Notification` 只能由页面弹，无法在窗口隐藏时保证展示且品牌是浏览器。
 - **为什么用 Node Inspector 注入**：不改安装文件、不需要管理员权限、官方支持的调试通道；`--inspect` 由启动器附加在命令行上，用户仍按原方式点击快捷方式启动。
 - **为什么不用 `--inspect-brk`**：等待调试器时 `Runtime.evaluate` 会挂起；`--inspect` 本身即可满足“先注入、后建托盘”，且即使注入晚于托盘创建也能用 `Runtime.queryObjects` 接管。
-- **失败回退**：桥接未安装/注入失败时，插件 Host 半仍可用 PowerShell WinRT toast 发系统通知（品牌为 Windows PowerShell）；托盘扩展不可用，但菜单保持 DSH 原样。
-- **安全边界**：Inspector 端口只绑 `127.0.0.1`；注入完成后注入器断开，可选由 hook 调 `node:inspector.close()` 关闭端口；不修改系统环境变量。
+- **通知必须由 DSH 应用自身发出**（用户明确要求）：只用 Electron 主进程的 `new Notification(...)`（Windows 上以 DeepSeek Harness 的 AUMID 显示），**不调用外部 PowerShell/WinRT/notify-send 等进程**。桥接未安装或注入失败时，插件只发布状态、不弹任何 OS 通知，菜单保持 DSH 原样（明确记录的降级模式）。
+- **安全边界**：Inspector 端口只绑 `127.0.0.1`；注入完成后注入器断开，并由 hook 调 `node:inspector.close()` 关闭端口；不修改系统环境变量。
 
 ## 6. 未决问题
 
 - 托盘菜单项点击“打开会话”：需要确认 DSH Web GUI 的会话深链（`dsh://open` 只聚焦窗口）。第一版先聚焦窗口，第二版再研究定位到具体会话。
-- Windows 通知品牌：桥接通知由 Electron `Notification` 发出，走 DSH 自己的 AUMID，品牌正确；备用 PowerShell 通道品牌为 PowerShell。
+- Windows 通知品牌：桥接通知由 Electron 主进程 `Notification` 发出，理论上是 DSH 应用自身身份（AUMID）；E2E 时需在隔离实例确认通知实际显示为 DeepSeek Harness、点击可聚焦窗口。
+- 注意：bridge 尚未安装时不会有任何通知（用户要求不使用外部 PowerShell 通知通道），这是明确接受的降级。
