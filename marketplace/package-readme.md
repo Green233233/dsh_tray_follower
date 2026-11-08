@@ -113,7 +113,25 @@ _Screenshots are added with the marketplace listing:_
 
 ## Install
 
-Install the plugin from the DSH **Plugins** page:
+> This repository is the source of truth: <https://github.com/Green233233/dsh_tray_follower>. The package is installable straight from a GitHub release tarball, no npm registry account needed.
+
+### From the GitHub release (recommended)
+
+1. Open **Settings → Plugins** (插件) in DSH Desktop and use **Add plugin** with the tarball URL:
+
+```powershell
+dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz
+```
+
+2. Enable the plugin row if it is installed disabled.
+
+### From the repository source
+
+```powershell
+dsh plugin --profile desktop add github:Green233233/dsh_tray_follower#path:/packages/dsh-tray-follower
+```
+
+### From npm (after the package is published there)
 
 1. Open **Settings → Plugins** (插件) in DSH Desktop.
 2. Search for `dsh-tray-follower` and click **Install**.

@@ -55,7 +55,7 @@ Current expected package shape (verify with the report, not by assumption):
 1. Create/pick the public GitHub repository, e.g.
    `https://github.com/<owner>/dsh-tray-follower` (the build machine cannot do
    this; run it from a connected machine).
-2. Replace the `your-org` placeholder in the catalog templates. The placeholder
+2. Replace the `Green233233` placeholder in the catalog templates. The placeholder
    appears only in:
    - `marketplace/awesome-plugin-entry.json` — `owner`, `url`, `page`, `icon`;
    - `marketplace/market-index-entry.json` — `title`, `homepage`,
@@ -69,12 +69,12 @@ Current expected package shape (verify with the report, not by assumption):
    preparation) and enable 2FA.
 
 A repository URL check is not automated because the build must stay offline; the
-build prints a warning while the `your-org` placeholder is in use.
+build prints a warning while the `Green233233` placeholder is in use.
 
 ```powershell
 # verify no placeholder remains in the templates or the built package
-Select-String -Path marketplace\*.json -Pattern 'your-org'
-Select-String -Path dist\dsh-tray-follower\package.json -Pattern 'your-org'
+Select-String -Path marketplace\*.json -Pattern 'Green233233'
+Select-String -Path dist\dsh-tray-follower\package.json -Pattern 'Green233233'
 ```
 
 Both commands must return nothing after the placeholders are replaced.

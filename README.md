@@ -7,6 +7,8 @@
 > 通知要求：**以 DSH 本应用名义发出，不使用外部 PowerShell 发通知**。本实现只有 Electron 主进程内的
 > `new Notification(...)` 一条通知通道，插件不调用任何外部通知进程。
 
+> GitHub: <https://github.com/Green233233/dsh_tray_follower> · 发布包：<https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz>
+
 ## 功能
 
 - **托盘菜单扩展**：右键 DSH 托盘图标，原「打开 / 退出」之外出现：
@@ -51,7 +53,7 @@ docs/                         设计（DESIGN）、验证记录（VERIFICATION�
 ```powershell
 # 在 DSH 里通过插件管理器安装（本仓库的 packages 目录为本地链接安装）
 # 等价 CLI（在仓库根目录、且 dsh 在 PATH 时）：
-dsh plugin --profile desktop add "C:\Users\Green\OneDrive\文档\Code_Workspace\dsh_tray_follower\packages\dsh-tray-follower"
+dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz
 ```
 
 安装后插件即开始写 `%LOCALAPPDATA%\dsh-tray-follower\state.json`；无桥接时**只发布状态、不发通知**。

@@ -1,15 +1,16 @@
 {
   "name": "dsh-tray-follower",
   "version": "0.2.0",
-  "private": true,
-  "description": "Publishes per-workspace DSH conversation status for the desktop tray bridge and sends fallback Windows notifications.",
+  "description": "Per-workspace DSH conversation status in the Windows system tray, native DeepSeek Harness notifications, and a live Tray follower settings page.",
   "keywords": [
     "deepseek",
     "deepseek-harness",
     "dsh-plugin",
     "dsh-bundle",
     "tray",
-    "notification"
+    "notification",
+    "windows",
+    "settings"
   ],
   "type": "module",
   "main": "./index.js",
@@ -53,5 +54,14 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.19.0"
+  },
+  "author": "Green233233",
+  "homepage": "https://github.com/Green233233/dsh_tray_follower#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Green233233/dsh_tray_follower.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Green233233/dsh_tray_follower/issues"
   }
 }

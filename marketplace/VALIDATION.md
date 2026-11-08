@@ -40,7 +40,7 @@ node --check: scripts/install-bridge.mjs OK
 node --check: scripts/uninstall-bridge.mjs OK
 node --check: index.js OK
 node --check: client.js OK
-WARN: repository/homepage/bugs use the `your-org` placeholder; pass --repository <url> or edit them before publishing
+WARN: repository/homepage/bugs use the `Green233233` placeholder; pass --repository <url> or edit them before publishing
 report:      dist/market-package-report.json
 BUILD OK
 ```
