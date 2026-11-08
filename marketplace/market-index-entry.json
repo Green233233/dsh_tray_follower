@@ -1,0 +1,35 @@
+{
+  "name": "dsh-tray-follower",
+  "title": "your-org/dsh-tray-follower",
+  "description": {
+    "en": "Per-workspace DSH conversation status in the Windows system tray and native DeepSeek Harness notifications for waiting, completed and failed conversations, with a live Tray follower settings page. The tray bridge is optional and installed once from the package with a reversible user-level script.",
+    "zh": "在 Windows 系统托盘里按工作区显示 DSH 对话状态，并在等待人工介入、完成或失败时由 DeepSeek Harness 应用本身发出原生通知；另含「托盘跟随」设置页，9 项设置实时生效。托盘桥接为可选项，通过包内脚本一次性安装，用户级、可逆。"
+  },
+  "homepage": "https://awesome-dsh-plugin.com/p/your-org/dsh-tray-follower/",
+  "repository": {
+    "url": "https://github.com/your-org/dsh-tray-follower"
+  },
+  "metadata": {
+    "category": "notify",
+    "keywords": [
+      "tray",
+      "notification",
+      "windows",
+      "desktop",
+      "conversation-status"
+    ],
+    "labels": [],
+    "sortKeys": {}
+  },
+  "versions": [
+    {
+      "version": "0.2.0",
+      "source": {
+        "type": "npm"
+      },
+      "engines": {
+        "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+      }
+    }
+  ]
+}
