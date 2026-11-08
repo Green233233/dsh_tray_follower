@@ -317,8 +317,8 @@ waterfall。因此同一等待会被两条路径观察两次；插件用同一 w
 - 契约原文：`docs/DESIGN.md` 第 40–81 行（`schemaVersion` / `updatedAt` /
   `hostPid` / `webOrigin` / `workspaces[].sessions[]` / `unreadEvents[]`）。
 - 路径：`%LOCALAPPDATA%\dsh-tray-follower\state.json`，`DSH_TRAY_FOLLOWER_DIR` 覆盖。
-- 桥接心跳：bridge 自己写 `<dataDir>\bridge.json`，契约 `{ pid, ts, version }`；
-  本插件按 `ts` 判断新鲜度（>15 s 视为无桥接，走 PowerShell 兜底）。
+- 桥接心跳：bridge 自己写 `<dataDir>\bridge.json`，契约 `{ pid, ts, version }`，
+  仅用于桥接自身诊断/存活展示；**插件不再据此回退发通知**（见 §6 变更说明）。
 - 写入实现：`lib/atomic-json.js`（tmp + rename，Windows 上 rename 被占用时删旧重试）、
   `lib/state-writer.js`（200 ms 合并窗口，错误只记日志）。
 - 事件消费：`docs/DESIGN.md` 第 81 行——桥接不删除文件，用 `updatedAt` + 事件
@@ -337,9 +337,12 @@ waterfall。因此同一等待会被两条路径观察两次；插件用同一 w
 - `lib/tracker.js` 第 160–214 行：`session/title`、`approval/asked|decided`、
   `tool/call`、`tool/result`、`turn/end` 的字段读取方式（本插件字段名与之相同，
   逻辑为独立实现）。
-- `lib/system.js` 第 77–100 行：PowerShell WinRT toast 的可行做法
-  （`-EncodedCommand` UTF-16LE base64、ToastGeneric XML、PowerShell AUMID）。
-  本插件的 `lib/fallback-toast.js` 是独立实现（自己的 XML/脚本构造与错误处理）。
+- `lib/system.js` 第 77–100 行：参考插件用 PowerShell WinRT toast 发通知的做法。
+  **本插件未采用**：用户明确要求通知必须以 DSH 本应用名义发出、不使用外部
+  PowerShell 进程；因此通知统一由 `bridge/` 在 Electron 主进程内用
+  `new Notification(...)` 发出，插件只发布状态（见 `docs/DESIGN.md` §5 与
+  `docs/VERIFICATION.md`）。参考代码仅用于确认 `agent/*`、`session/event` 等
+  API 用法，业务代码全部原创。
 
 ---
 
