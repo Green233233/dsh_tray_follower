@@ -101,6 +101,13 @@ node scripts/build-market-package.mjs            # 产出 dist/ 单包发布物 
 `scripts/install-bridge.mjs`（`dsh-tray-follower-bridge` bin）。用户安装插件后，只需运行一次
 `npx dsh-tray-follower-bridge --apply` 再重启 DSH，即可获得托盘扩展与通知；也可只用通知/设置部分。
 
+## 发布状态
+
+- GitHub 仓库：<https://github.com/Green233233/dsh_tray_follower>（MIT）
+- 发布包：<https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.0>（tarball 安装：dsh plugin --profile desktop add <tarball-url>）
+- dshmarket 收录 PR：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145>（数据文件 data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml；自动检查中，仓库满 1 天后年龄项自动通过）
+- npm：暂未发布（本机无 npm 登录凭据）；目录条目使用 GitHub Release tarball 安装
+
 ## 已知限制
 
 - **桥接只能在 DSH 启动时注入**：直接双击 `DeepSeek Harness.exe`（未经启动器）不会扩展托盘；

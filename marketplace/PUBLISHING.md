@@ -479,3 +479,11 @@ package; see `marketplace/VALIDATION.md` for the checks behind them.
    menu, no notifications). There is deliberately **no notifications-only
    mode** — notifications are in-process Electron notifications created by the
    bridge, and the plugin never spawns an external notifier.
+
+
+## 2026-11-08 release record
+
+- GitHub repository: <https://github.com/Green233233/dsh_tray_follower> (public, MIT, topics: dsh-plugin, deepseek-harness, deepseek, windows, electron, tray, notification, dsh)
+- Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.0> with dsh-tray-follower-0.2.0.tgz (96,325 bytes)
+- Catalog PR: <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145> (single YAML entry data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml; the gate reports the repository-age rule until the repo is 1 day old, then the check re-runs by itself)
+- npm: not published (no npm credentials on this machine); entry uses the GitHub Release tarball field instead.
