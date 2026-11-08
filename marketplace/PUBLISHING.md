@@ -487,3 +487,9 @@ package; see `marketplace/VALIDATION.md` for the checks behind them.
 - Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.2> with dsh-tray-follower-0.2.2.tgz (96,325 bytes)
 - Catalog PR: <https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/13145> (single YAML entry data/plugins/Green233233__dsh_tray_follower--packages-dsh-tray-follower.yml; the gate reports the repository-age rule until the repo is 1 day old, then the check re-runs by itself)
 - npm: not published (no npm credentials on this machine); entry uses the GitHub Release tarball field instead.
+
+## 2026-11-08 v0.2.2 release record
+
+- Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.2> with dsh-tray-follower-0.2.2.tgz (99,250 bytes)
+- Catalog PR updated to v0.2.2 (entry tarball URL v0.2.2).
+- Changes: About page, tray deep links, complete idle list, native Switch, 托盘随航 rename.
