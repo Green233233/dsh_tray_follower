@@ -71,18 +71,19 @@ node tools/install-bridge.mjs --apply
 | 可逆性 | PASS；`node tools/uninstall-bridge.mjs`（dry-run）正确列出两条快捷方式还原计划与 app 载荷删除计划 |
 | 启动链路（DSH 已运行时） | PASS；直接运行 VBS → PS1（隐藏）→ `launch.mjs`，正确识别已运行主进程 pid=14136、写 `injector.log`（`already-running`）、以普通模式拉起实例聚焦已有窗口，未产生多余常驻进程，弹出“请先完全退出 DSH”提示 |
 
-## 4. 真实运行实例（待用户重启后验证）
+## 4. 真实运行实例（已注入，用户在真实托盘上点击验证过）
 
-当前正在运行的 DSH 是普通方式启动（无 `--inspect`），桥接无法注入；已安装桥接启动器并替换快捷方式，
-需要用户完全退出 DSH、从快捷方式重新启动后验证真实效果。待办：
+用户完全退出 DSH 后，用替换后的快捷方式重启（2026-11-08 08:15）。实测证据：
 
-- [x] 安装桥接启动器（`node tools/install-bridge.mjs --apply`，已备份并替换开始菜单/桌面快捷方式）
-- [ ] 完全退出 DSH，用新快捷方式启动（启动时注入桥接）
-- [ ] 右键托盘图标：确认原「打开/退出」之外出现工作区/会话状态区
-- [ ] 最小化 DSH，触发一次需要批准的对话：确认出现 DeepSeek Harness 名义的系统通知
-- [ ] 隐藏 DSH，等待会话完成：确认「任务完成」通知
-- [ ] 检查 `%LOCALAPPDATA%\dsh-tray-follower\bridge.log`（应有 `hook-loaded`、`tray-adopted`、`menu-rebuilt`）
-- [ ] 启动器失败回退：确认 `injector.log` 与普通模式启动
+| 检查项 | 结果 |
+|---|---|
+| 启动参数 | PASS；主进程命令行含 `--inspect=127.0.0.1:9531`（启动器注入），pid 19012 |
+| 注入器日志 | PASS；`injector.log` 记录 inspector-target 174ms、hook-injected（patched=true）、trays-adopted（count=2, adopted=1）、hook-finalized、inspector-closed |
+| 桥接日志 | PASS；`bridge.log` 记录 `hook-loaded`、`tray-patch`、`cursor-loaded`（首次基线 1 条）、`app-ready`、`tray-captured`（原菜单：打开/分隔线/退出）、`tray-adopted`、`menu-rebuilt` |
+| 菜单随真实数据刷新 | PASS；`menu-rebuilt` 持续出现，真实数据从 workspaces=1/sessions=5 → workspaces=2/sessions=4/running=2 变化，`applied:1` 无错误 |
+| 真实托盘点击（用户操作） | PASS；`bridge.log` 记录两次 `window-focused {"actions":["focus"]}` + `focus-request {"reason":"tray-session","ok":true}`（08:18:20、08:20:15），说明用户右键托盘后点击了会话行，桥接成功聚焦 DSH 窗口 |
+| 安全收尾 | PASS；`inspector-close-scheduled` → `inspector-closed`（9531 端口已不可连接）；心跳 `bridge.json` 每 5s 刷新 |
+| 通知（真实实例） | 待验证：需 DSH 最小化/失焦时出现新的完成或需要人工事件；当前用户一直聚焦 DSH，桥接按设计不打扰。下次轮次检查 `bridge.log` 的 `notification-shown` / `notification-suppressed` 即可确认 |
 
 ## 5. 已执行的安全/回滚检查
 
