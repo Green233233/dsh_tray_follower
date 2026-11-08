@@ -128,6 +128,7 @@ node tools/install-bridge.mjs --apply
 | Host Config schema | PASS；`cordis_inspect_query Config.listConfigs` → entry `include:dsh-tray-follower`，`status: "schema"`，9 个字段全部 `x-cordis.volatile: true`，中英双语 description，number 字段 `minimum:1, maximum:20` |
 | Client 设置页注册 | PASS；`cordis_inspect_query client Slots.listSubTree root=settings.section` → occupants 含 `{id:"tray-follower", order:30, active:true}`（与 cost-meter 同为 order 30，居中排布） |
 | Client→Host 设置写入（真实用户操作） | **PASS**；用户在真实设置页点击开关后，`state.json.options.tray.showFooter` 由默认 `true` 变为 `false`（`updatedAt` 同步刷新），证明 设置页 → Config → state.json 的实时链路已跑通；用户同时反馈开关响应偏慢、可读性一般，已安排 UI 优化（乐观更新 + 排版重做） |
+| 设置页 UI 复检（真实用户） | **PASS**；乐观更新 + 排版重做后重新热加载，用户复检反馈「开关即时响应，排版也清晰」，并再次操作开关成功（`state.json` 持续写入 `schemaVersion:2` + `options`，Client 槽位 `tray-follower` 仍 active） |
 | 桥接日志可观测性 | PASS；v0.2.0 的 `menu-rebuilt` 日志新增 `showIdle` / `maxSessionsPerWorkspace` / `displayedSessions` 字段，重启后可直接从 `bridge.log` 验证“空闲对话未出现在菜单” |
 | 桥接载荷更新 | PASS；`node tools/install-bridge.mjs --apply` 重新安装 v0.2.0 载荷到 `%LOCALAPPDATA%\dsh-tray-follower\app`（shell-hook/injector/launcher + install.json），开始菜单快捷方式保持指向启动器、桌面快捷方式 already |
 | 待重启确认 | **未验证（需用户重启 DSH）**：当前运行的桥接仍是 v0.1.0 进程内代码，托盘菜单要等 DSH 从快捷方式重启后才会应用 v0.2.0 的“空闲对话默认隐藏 + 设置即时生效”；`bridge.log` 目前记录 `schemaVersion 2 is not 1; parsed best-effort`（旧桥接对 v2 的兼容告警），重启后应消失 |
