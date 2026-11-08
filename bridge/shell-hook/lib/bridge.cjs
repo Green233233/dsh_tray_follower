@@ -15,7 +15,7 @@ const {
 const { describeError, parseEnvFlag, parseEnvInt, safeJsonStringify, toJsonSafe } = require('./util.cjs')
 const { createLogger } = require('./log.cjs')
 const { readStateFile } = require('./state.cjs')
-const { buildStatusSection, menuSignature, toElectronTemplate, describeSection } = require('./menu-model.cjs')
+const { buildStatusSection, menuSignature, toElectronTemplate, describeSection, resolveTraySettings } = require('./menu-model.cjs')
 const { planNotifications } = require('./notify-policy.cjs')
 const { loadCursor, saveCursor, withSeen, withLastNotifyAt } = require('./cursor.cjs')
 const { createTrayPatcher, describeTemplate, isUsableTray, safeTooltip } = require('./tray-patch.cjs')
@@ -378,6 +378,18 @@ function createBridge(options = {}) {
     }
   }
 
+  /** Count rendered session rows (workspace and idle-group submenus included). */
+  function countSessionRows(section) {
+    let count = 0
+    if (!Array.isArray(section)) return count
+    for (const item of section) {
+      if (!item || typeof item !== 'object') continue
+      if (item.kind === 'session') count += 1
+      else if (Array.isArray(item.submenu)) count += countSessionRows(item.submenu)
+    }
+    return count
+  }
+
   function rebuildMenu(reason) {
     try {
       if (bridge.stopped) return { ok: false, reason: 'stopped' }
@@ -426,6 +438,7 @@ function createBridge(options = {}) {
       bridge.menuDirty = false
       bridge.menuRebuilds += 1
       const stats = (bridge.lastState && bridge.lastState.stats) || { running: 0, pending: 0, sessions: 0 }
+      const traySettings = resolveTraySettings(bridge.lastState)
       logger.log('menu-rebuilt', {
         reason,
         applied,
@@ -434,6 +447,12 @@ function createBridge(options = {}) {
         sessions: stats.sessions || 0,
         running: stats.running || 0,
         pending: stats.pending || 0,
+        // Settings-driven tray behaviour, so a live install can be verified from
+        // the log alone: showIdle=false means idle conversations are not listed,
+        // and displayedSessions counts the session rows actually rendered.
+        showIdle: traySettings.showIdle === true,
+        maxSessionsPerWorkspace: traySettings.maxSessionsPerWorkspace,
+        displayedSessions: countSessionRows(section),
         unavailable: bridge.lastState === null
       })
       logger.diag('menu-rebuilt', {

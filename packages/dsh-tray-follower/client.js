@@ -9,8 +9,16 @@
  * The browser artifact is a plain script registered with the Harness module
  * loader: no JSX, no bundler, no import of any Harness Client package. React
  * comes from the loader's module table. Styling uses only `--dsw-alias-*`
- * theme tokens; the page follows the settings shell's own layout (max-width,
- * section heading, 12-13px rows, 8px gaps).
+ * theme tokens and inline style objects.
+ *
+ * Interaction model:
+ * - The snapshot is read through a small stable store hook (`useState` +
+ *   `useEffect` subscribe), the same pattern as the official
+ *   `createSnapshotStore`, so every Host revision re-renders reliably.
+ * - A switch flips immediately in local `pending` state, then submits
+ *   `form.set(field, value)`. The pending value survives until the snapshot
+ *   reflects it; a refusal or rejection reverts the switch and shows the
+ *   save-failed notice.
  *
  * Host contract (owned by the Host half, fixed field names):
  *   showIdle, maxSessionsPerWorkspace, showHeaderCounts, showFooter,
@@ -89,7 +97,7 @@ window.__ModuleLoader__.load({
       showIdle: 'Show idle conversations',
       showIdleHint: 'Also list conversations that are not running. Off by default.',
       maxSessionsPerWorkspace: 'Conversations per workspace',
-      maxSessionsPerWorkspaceHint: 'How many conversations each workspace lists (1–20). Default: 6.',
+      maxSessionsPerWorkspaceHint: 'How many conversations each workspace lists.',
       showHeaderCounts: 'Show counts in the header',
       showHeaderCountsHint: 'Append running and waiting counts to the conversation header.',
       showFooter: 'Show the footer',
@@ -121,7 +129,7 @@ window.__ModuleLoader__.load({
       showIdle: '显示空闲对话',
       showIdleHint: '打开后，托盘菜单也会列出没有在运行的对话。默认关闭。',
       maxSessionsPerWorkspace: '每个工作区显示的对话数',
-      maxSessionsPerWorkspaceHint: '每个工作区最多列出多少个对话（1–20）。默认 6。',
+      maxSessionsPerWorkspaceHint: '每个工作区最多列出多少个对话。',
       showHeaderCounts: '标题显示数量',
       showHeaderCountsHint: '在“对话状态”标题后显示运行中与等待中的数量。',
       showFooter: '显示页脚',
@@ -144,11 +152,11 @@ window.__ModuleLoader__.load({
 
     /** Inline styles; every color is a DSH theme token, never a literal. */
     const styles = {
-      section: {
+      page: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
-        maxWidth: '640px',
+        gap: '16px',
+        maxWidth: '720px',
         minWidth: 0,
         color: 'var(--dsw-alias-label-primary)',
         fontSize: '13px',
@@ -156,7 +164,7 @@ window.__ModuleLoader__.load({
       },
       heading: {
         margin: 0,
-        fontSize: '18px',
+        fontSize: '17px',
         lineHeight: '24px',
         fontWeight: 600,
         color: 'var(--dsw-alias-label-primary)',
@@ -168,14 +176,10 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-secondary)',
       },
       notice: {
-        margin: 0,
-        padding: '8px 12px',
-        fontSize: '12px',
+        margin: '12px 0 0',
+        fontSize: '12.5px',
         lineHeight: '18px',
         color: 'var(--dsw-alias-label-secondary)',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        border: '1px solid var(--dsw-alias-border-l1)',
-        borderRadius: '8px',
       },
       noticeError: {
         color: 'var(--dsw-alias-state-error-primary)',
@@ -183,23 +187,25 @@ window.__ModuleLoader__.load({
       group: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
         minWidth: 0,
       },
       groupTitle: {
         margin: 0,
+        padding: '12px 0',
         fontSize: '13px',
-        lineHeight: '20px',
+        lineHeight: '18px',
         fontWeight: 600,
-        color: 'var(--dsw-alias-label-primary)',
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        color: 'var(--dsw-alias-label-secondary)',
       },
       card: {
         display: 'flex',
         flexDirection: 'column',
+        padding: '4px 16px',
         background: 'var(--dsw-alias-bg-layer-1)',
         border: '1px solid var(--dsw-alias-border-l1)',
-        borderRadius: '10px',
-        overflow: 'hidden',
+        borderRadius: '12px',
       },
       row: {
         display: 'flex',
@@ -207,7 +213,7 @@ window.__ModuleLoader__.load({
         justifyContent: 'space-between',
         gap: '12px',
         minHeight: '44px',
-        padding: '10px 14px',
+        padding: '10px 0',
         boxSizing: 'border-box',
       },
       rowDivider: {
@@ -216,53 +222,60 @@ window.__ModuleLoader__.load({
       rowCopy: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '2px',
         minWidth: 0,
       },
       rowLabel: {
-        fontSize: '13px',
+        fontSize: '14px',
         lineHeight: '20px',
+        fontWeight: 500,
         color: 'var(--dsw-alias-label-primary)',
       },
       rowHint: {
-        fontSize: '12px',
+        marginTop: '2px',
+        fontSize: '12.5px',
         lineHeight: '18px',
         color: 'var(--dsw-alias-label-secondary)',
       },
-      controlCell: {
+      controlColumn: {
         flex: 'none',
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'flex-end',
         gap: '8px',
+        minWidth: '120px',
       },
       switchTrack: {
         position: 'relative',
         flex: 'none',
-        width: '38px',
+        width: '40px',
         height: '22px',
         padding: 0,
-        borderRadius: '11px',
+        boxSizing: 'border-box',
+        borderRadius: '999px',
         border: '1px solid var(--dsw-alias-border-l2)',
         background: 'var(--dsw-alias-bg-layer-2)',
         cursor: 'pointer',
-        transition: 'background-color 120ms ease, border-color 120ms ease',
+        transition: 'background-color 150ms ease, border-color 150ms ease',
       },
       switchTrackOn: {
         background: 'var(--dsw-alias-brand-primary)',
-        borderColor: 'var(--dsw-alias-brand-primary)',
+        borderColor: 'transparent',
+      },
+      switchFocus: {
+        outline: '2px solid var(--dsw-alias-brand-primary)',
+        outlineOffset: '2px',
       },
       switchKnob: {
         position: 'absolute',
         top: '2px',
         left: '2px',
         display: 'block',
-        width: '16px',
-        height: '16px',
-        borderRadius: '50%',
+        width: '18px',
+        height: '18px',
+        borderRadius: '999px',
         background: 'var(--dsw-alias-bg-base)',
-        border: '1px solid var(--dsw-alias-border-l1)',
         boxSizing: 'border-box',
-        transition: 'transform 120ms ease',
+        transition: 'transform 150ms ease',
       },
       switchKnobOn: {
         transform: 'translateX(16px)',
@@ -272,18 +285,26 @@ window.__ModuleLoader__.load({
         cursor: 'not-allowed',
       },
       numberInput: {
-        width: '72px',
+        width: '84px',
         boxSizing: 'border-box',
-        padding: '4px 8px',
-        fontSize: '13px',
+        padding: '6px 10px',
+        fontSize: '13.5px',
         lineHeight: '20px',
         textAlign: 'center',
         color: 'var(--dsw-alias-label-primary)',
         background: 'var(--dsw-alias-bg-base)',
         border: '1px solid var(--dsw-alias-border-l2)',
-        borderRadius: '6px',
+        borderRadius: '8px',
+      },
+      rangeHint: {
+        fontSize: '12px',
+        lineHeight: '18px',
+        color: 'var(--dsw-alias-label-secondary)',
       },
     }
+
+    /** Stable snapshot of the placeholder store below. */
+    const MISSING_SNAPSHOT = { status: 'unavailable', writable: false, revision: undefined, value: {} }
 
     /**
      * Placeholder store used only if the slot delivers no form; keeps the
@@ -291,7 +312,7 @@ window.__ModuleLoader__.load({
      */
     const MISSING_FORM = {
       getSnapshot() {
-        return { status: 'unavailable', writable: false, revision: undefined, value: {} }
+        return MISSING_SNAPSHOT
       },
       subscribe() {
         return () => {}
@@ -325,12 +346,62 @@ window.__ModuleLoader__.load({
       return rounded
     }
 
+    /** True when focus arrived from the keyboard, so only then show the ring. */
+    function isKeyboardFocus(event) {
+      try {
+        const target = event !== undefined && event !== null ? event.currentTarget : undefined
+        return typeof target?.matches === 'function' ? target.matches(':focus-visible') : true
+      } catch {
+        return true
+      }
+    }
+
+    /**
+     * Read the shared Host Config form as a stable React store: one snapshot
+     * state, one subscription effect. This is the `useState` + `useEffect`
+     * shape of the official `createSnapshotStore`, and avoids relying on a
+     * fresh `getSnapshot` closure for every render.
+     * @param {any} form the shared config form for this Host entry
+     * @returns the current form snapshot
+     */
+    function useFormSnapshot(form) {
+      const [snapshot, setSnapshot] = React.useState(() => form.getSnapshot())
+      React.useEffect(() => {
+        let active = true
+        const sync = () => {
+          if (!active) return
+          setSnapshot(() => form.getSnapshot())
+        }
+        sync()
+        let dispose
+        try {
+          dispose = form.subscribe(sync)
+        } catch {
+          dispose = undefined
+        }
+        return () => {
+          active = false
+          if (typeof dispose === 'function') {
+            try {
+              dispose()
+            } catch {
+              // The owning form already settled the subscription.
+            }
+          }
+        }
+      }, [form])
+      return snapshot
+    }
+
     /**
      * A settings switch: a real button with `role="switch"` and
      * `aria-checked`, matching how the Harness exposes binary preferences.
      */
-    function toggleControl(options) {
-      const { field, checked, disabled, label, onToggle } = options
+    function switchControl(options) {
+      const { field, checked, disabled, focusRing, label, onToggle, onFocus, onBlur } = options
+      const track = disabled
+        ? Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null, styles.disabled)
+        : Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null)
       return h(
         'button',
         {
@@ -342,9 +413,9 @@ window.__ModuleLoader__.load({
           'data-field': field,
           disabled,
           onClick: () => onToggle(field),
-          style: disabled
-            ? Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null, styles.disabled)
-            : Object.assign({}, styles.switchTrack, checked ? styles.switchTrackOn : null),
+          onFocus,
+          onBlur,
+          style: focusRing ? Object.assign({}, track, styles.switchFocus) : track,
         },
         h(
           'span',
@@ -360,7 +431,7 @@ window.__ModuleLoader__.load({
 
     /** One labelled preference row with its control on the trailing edge. */
     function toggleRow(options) {
-      const { t, field, checked, disabled, onToggle, divider } = options
+      const { t, field, checked, disabled, focusRing, onToggle, onFocus, onBlur, divider } = options
       return h(
         'div',
         {
@@ -375,8 +446,17 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { style: styles.controlCell },
-          toggleControl({ field, checked, disabled, label: t(field), onToggle }),
+          { style: styles.controlColumn },
+          switchControl({
+            field,
+            checked,
+            disabled,
+            focusRing,
+            label: t(field),
+            onToggle,
+            onFocus,
+            onBlur,
+          }),
         ),
       )
     }
@@ -399,7 +479,7 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { style: styles.controlCell },
+          { style: styles.controlColumn },
           h('input', {
             id: inputId,
             type: 'number',
@@ -417,13 +497,15 @@ window.__ModuleLoader__.load({
               ? Object.assign({}, styles.numberInput, styles.disabled)
               : styles.numberInput,
           }),
+          h('span', { style: styles.rangeHint, 'aria-hidden': true }, '1–20'),
         ),
       )
     }
 
     /**
-     * The Settings page. It reads the shared Host Config form through the slot
-     * hook injected at registration and writes immediately on interaction.
+     * The Settings page. It reads the shared Host Config form, optimistically
+     * reflects each switch while the Host round-trip is in flight, and shows
+     * the refusal notice when a write comes back rejected.
      * @param {{ t: (key: string) => string, form?: any }} props slot props
      * @returns the rendered React element tree
      */
@@ -435,45 +517,96 @@ window.__ModuleLoader__.load({
         typeof props.form.getSnapshot === 'function'
           ? props.form
           : MISSING_FORM
-      const snapshot = React.useSyncExternalStore(
-        (onStoreChange) => form.subscribe(onStoreChange),
-        () => form.getSnapshot(),
-      )
+      const snapshot = useFormSnapshot(form)
+      const [pending, setPending] = React.useState({})
       const [failed, setFailed] = React.useState(false)
+      const [focusRing, setFocusRing] = React.useState(null)
+
       const status = snapshot !== undefined && snapshot !== null ? snapshot.status : 'loading'
       const writable = snapshot !== undefined && snapshot !== null && snapshot.writable === true
       const ready = status === 'ready'
       const disabled = !ready || !writable
-      const values =
+      const snapshotValues =
         ready && snapshot.value !== undefined && snapshot.value !== null && typeof snapshot.value === 'object'
           ? snapshot.value
           : {}
 
-      /** Submit one field write and reflect a refusal in the notice line. */
+      // Drop an optimistic value once the accepted snapshot carries it.
+      React.useEffect(() => {
+        if (snapshot === undefined || snapshot === null || snapshot.status !== 'ready') return
+        const values = snapshot.value
+        if (values === undefined || values === null || typeof values !== 'object') return
+        setPending((current) => {
+          let changed = false
+          const next = {}
+          for (const field of Object.keys(current)) {
+            if (Object.prototype.hasOwnProperty.call(values, field) && values[field] === current[field]) {
+              changed = true
+              continue
+            }
+            next[field] = current[field]
+          }
+          return changed ? next : current
+        })
+      }, [snapshot])
+
+      // Optimistic values win until the Host snapshot catches up.
+      const values = Object.assign({}, snapshotValues, pending)
+
+      /** Forget one optimistic value, restoring the snapshot value. */
+      const clearPending = (field) => {
+        setPending((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, field)) return current
+          const next = Object.assign({}, current)
+          delete next[field]
+          return next
+        })
+      }
+
+      /**
+       * Flip one switch immediately in local state, then persist it. A
+       * refusal or rejection reverts the optimistic value and shows the
+       * save-failed notice.
+       */
       const write = (field, value) => {
+        setPending((current) => Object.assign({}, current, { [field]: value }))
         let result
         try {
           result = form.set(field, value)
         } catch {
+          clearPending(field)
           setFailed(true)
           return
         }
-        if (result !== undefined && result !== null && typeof result.then === 'function') {
-          result.then(
-            (accepted) => {
-              setFailed(accepted === false)
-            },
-            () => {
+        if (result === undefined || result === null || typeof result.then !== 'function') return
+        result.then(
+          (accepted) => {
+            if (accepted === false) {
+              clearPending(field)
               setFailed(true)
-            },
-          )
-        }
+            } else {
+              setFailed(false)
+            }
+          },
+          () => {
+            clearPending(field)
+            setFailed(true)
+          },
+        )
       }
 
       /** Flip one switch. Disabled rows never reach here. */
       const onToggle = (field) => {
         if (disabled) return
         write(field, !readToggle(values, field))
+      }
+
+      /** Show the keyboard focus ring on the switch that owns focus. */
+      const onFocus = (field) => (event) => {
+        if (isKeyboardFocus(event)) setFocusRing(field)
+      }
+      const onBlur = () => {
+        setFocusRing(null)
       }
 
       /** Clamp and persist the session cap when the field loses focus. */
@@ -563,7 +696,10 @@ window.__ModuleLoader__.load({
                 field: row.field,
                 checked: readToggle(values, row.field),
                 disabled,
+                focusRing: focusRing === row.field,
                 onToggle,
+                onFocus: onFocus(row.field),
+                onBlur,
                 divider,
               }),
             )
@@ -579,7 +715,7 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h('div', { style: styles.section }, children)
+      return h('div', { style: styles.page }, children)
     }
 
     return {
