@@ -493,3 +493,9 @@ package; see `marketplace/VALIDATION.md` for the checks behind them.
 - Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.2> with dsh-tray-follower-0.2.2.tgz (99,250 bytes)
 - Catalog PR updated to v0.2.2 (entry tarball URL v0.2.2).
 - Changes: About page, tray deep links, complete idle list, native Switch, 托盘随航 rename.
+
+## 2026-11-09 v0.2.3 release record
+
+- Release: <https://github.com/Green233233/dsh_tray_follower/releases/tag/v0.2.3> with `dsh-tray-follower-0.2.3.tgz` (106,136 bytes)
+- Bridge extension-hook host (loads `<dataDir>/extensions/*`); integration point for the dsh-topbar Electron hook.
+- Catalog PR entry updated to v0.2.3.

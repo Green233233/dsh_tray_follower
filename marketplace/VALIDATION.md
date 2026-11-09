@@ -12,8 +12,8 @@ Environment used for the recorded outputs below:
 | OS | Windows 11 |
 | Node | 24.18.1 |
 | npm | 11.16.0 |
-| DSH Desktop | 0.2.2-rc.1 |
-| Package under test | `dist/dsh-tray-follower` @ `0.2.2` |
+| DSH Desktop | 0.2.3-rc.1 |
+| Package under test | `dist/dsh-tray-follower` @ `0.2.3` |
 
 ---
 
@@ -32,10 +32,10 @@ repo:        <repo>
 source:      packages/dsh-tray-follower
 output:      dist/dsh-tray-follower
 
-version:     0.2.2
+version:     0.2.3
 client half: present (client.js)
 files:       50 copied
-npm pack:    dsh-tray-follower-0.2.2.tgz (tar 92.4 KiB, unpacked 342.4 KiB, 50 entries)
+npm pack:    dsh-tray-follower-0.2.3.tgz (tar 92.4 KiB, unpacked 342.4 KiB, 50 entries)
 node --check: scripts/install-bridge.mjs OK
 node --check: scripts/uninstall-bridge.mjs OK
 node --check: index.js OK
@@ -65,7 +65,7 @@ non-zero with a clear `ERROR:` line):
 node -e "const r=require('./dist/market-package-report.json'); const ok=r.ok && r.clientHalf && r.checks.missingRequiredFiles.length===0 && r.checks.libFiles>0 && r.pack && r.pack.entryCount===r.fileCount && r.pack.size<10*1024*1024; console.log(JSON.stringify({ok:r.ok,version:r.version,clientHalf:r.clientHalf,fileCount:r.fileCount,libFiles:r.checks.libFiles,packSize:r.pack.size,missing:r.checks.missingRequiredFiles,warnings:r.warnings},null,2)); if(!ok) process.exit(1)"
 ```
 
-Expected: `ok: true`, `version: "0.2.2"`, `clientHalf: true`, `fileCount: 50`,
+Expected: `ok: true`, `version: "0.2.3"`, `clientHalf: true`, `fileCount: 50`,
 `libFiles: 11`, `packSize: 94566` (≈ 92.4 KiB), `missing: []`, and at most the
 placeholder warning.
 
@@ -75,7 +75,7 @@ Also check the generated manifest:
 node -e "const p=require('./dist/dsh-tray-follower/package.json'); const checks={name:p.name,version:p.version,license:p.license,privateIncluded:'private' in p,clientExport:p.exports['./client'],bundlePatch:p.dsh.bundle.patch,clientPlatform:p.dsh.client.platform,deps:p.dependencies,peer:p.peerDependencies,engines:p.engines}; console.log(JSON.stringify(checks,null,2)); if(p.name!=='dsh-tray-follower'||p.license!=='MIT'||'private' in p||!p.dsh.bundle.patch||!p.dsh.client||p.dependencies['@deepseek-ai/schemastery']!=='~3.19.0'||p.peerDependencies['@deepseek-ai/cordis']!=='~4.1.0') process.exit(1)"
 ```
 
-Expected: `name` `dsh-tray-follower`, `version` `0.2.2`, `license` `MIT`,
+Expected: `name` `dsh-tray-follower`, `version` `0.2.3`, `license` `MIT`,
 `privateIncluded: false`, `clientExport` `./client.js`, `bundlePatch`
 `./cordis.patch.yml`, `clientPlatform` `web`, dependency
 `@deepseek-ai/schemastery ~3.19.0`, peer `@deepseek-ai/cordis ~4.1.0`,
@@ -101,7 +101,7 @@ layout and resolve the payload inside the package:
 ```powershell
 Select-String -Path dist\dsh-tray-follower\scripts\*.mjs -Pattern 'tools[/\\]'
 # Expected: no matches
-Select-String -Path dist\dsh-tray-follower\scripts\install-bridge.mjs -Pattern "VERSION = '0.2.2'"
+Select-String -Path dist\dsh-tray-follower\scripts\install-bridge.mjs -Pattern "VERSION = '0.2.3'"
 # Expected: one match
 ```
 
@@ -120,7 +120,7 @@ Expected:
 
 ```
 {
-  filename: 'dsh-tray-follower-0.2.2.tgz',
+  filename: 'dsh-tray-follower-0.2.3.tgz',
   size: 94566,
   unpackedSize: 350583,
   entryCount: 50,
@@ -230,7 +230,7 @@ dsh plugin --profile desktop add "<repo>\dist\dsh-tray-follower"
 Option B — after publishing:
 
 ```powershell
-dsh plugin --profile desktop add dsh-tray-follower@0.2.2
+dsh plugin --profile desktop add dsh-tray-follower@0.2.3
 ```
 
 Expected:
@@ -278,7 +278,7 @@ backup under `backup\shortcuts`.
    - original Open / Quit items still work;
    - header `对话：N 运行 / M 待处理` (or English);
    - one submenu per workspace with status glyphs and no idle rows by default;
-   - footer `dsh-tray-follower v0.2.2`.
+   - footer `dsh-tray-follower v0.2.3`.
 4. Enable `showIdle` in settings and confirm the `空闲会话 (N)` /
    `Idle sessions (N)` submenu appears within ~1 s.
 5. Hide/minimize DSH and trigger an approval request:

@@ -18,7 +18,7 @@ the Electron main process), so Windows attributes them to the DSH application
 itself. The plugin never starts an external PowerShell/WinRT/notify-send
 notifier.
 
-> **Status:** 0.2.2 — Windows 10/11, DSH Desktop 0.2.2-rc.1 or newer.
+> **Status:** 0.2.3 — Windows 10/11, DSH Desktop 0.2.3-rc.1 or newer.
 
 ---
 
@@ -57,7 +57,7 @@ Conversations: 1 running / 2 waiting      (disabled header)
    … 3 more conversations                 (only when over the row limit)
 📁 default-workspace  0 running · 1 waiting
    ❓ Choose an option
-dsh-tray-follower v0.2.2                  (footer, can be hidden)
+dsh-tray-follower v0.2.3                  (footer, can be hidden)
 ```
 
 - Conversations are grouped by workspace and ordered by urgency:
@@ -104,7 +104,7 @@ _Screenshots are added with the marketplace listing:_
 - **Windows 10 or 11** — the tray bridge is Windows-specific (the Host plugin
   itself publishes state on every platform, but the tray menu and notifications
   depend on the Windows shell and Electron tray).
-- **DSH Desktop 0.2.2-rc.1 or newer** — the settings page uses the
+- **DSH Desktop 0.2.3-rc.1 or newer** — the settings page uses the
   `settings.section` slot and `ctx.configForms`, both available in that build.
 - **Node.js 20+** — only to run the one-time bridge installer. The launcher
   prefers the Node runtime bundled with DSH, so a system Node.js is optional.
@@ -120,7 +120,7 @@ _Screenshots are added with the marketplace listing:_
 1. Open **Settings → Plugins** (插件) in DSH Desktop and use **Add plugin** with the tarball URL:
 
 ```powershell
-dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.2/dsh-tray-follower-0.2.2.tgz
+dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.3/dsh-tray-follower-0.2.3.tgz
 ```
 
 2. Enable the plugin row if it is installed disabled.
@@ -334,7 +334,7 @@ backward compatible with 0.1 state files, and the 0.1 plugin simply writes
 | Symptom | Check / fix |
 | --- | --- |
 | No `state.json` | Is the plugin enabled on the **Plugins** page? Look for `[dsh-tray-follower]` warnings in the DSH Host log. Default path: `%LOCALAPPDATA%\dsh-tray-follower\state.json`. |
-| Settings page missing | DSH Desktop older than 0.2.2-rc.1, or the plugin is disabled. Update DSH and re-enable the plugin. |
+| Settings page missing | DSH Desktop older than 0.2.3-rc.1, or the plugin is disabled. Update DSH and re-enable the plugin. |
 | Plugin works, tray menu unchanged | The bridge was not injected. Start DSH from its shortcut (not `DeepSeek Harness.exe` directly), and make sure DSH was **fully quit** before launching. Check `injector.log` for `BRIDGE_OK` / `ALREADY_RUNNING`. Re-run `install-bridge.mjs --apply` if the installer was never run or a DSH update recreated the shortcut. |
 | `injector.log` says the inspector never appeared | Port blocked/occupied by another Node inspector, the wrong executable, or antivirus interference. Retry; pass `--exe <path>` if DSH is installed elsewhere. |
 | Bridge injected but no tray section | `bridge.log` should contain `tray-patched` and `menu-rebuilt`. `patched: false` means the tray was created too late (DSH quit early) or the platform is not Windows. |
