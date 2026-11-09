@@ -7,7 +7,7 @@
 > 通知要求：**以 DSH 本应用名义发出，不使用外部 PowerShell 发通知**。本实现只有 Electron 主进程内的
 > `new Notification(...)` 一条通知通道，插件不调用任何外部通知进程。
 
-> GitHub: <https://github.com/Green233233/dsh_tray_follower> · 发布包：<https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz>
+> GitHub: <https://github.com/Green233233/dsh_tray_follower> · 发布包：<https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.3/dsh-tray-follower-0.2.3.tgz>
 
 ## 功能
 
@@ -32,7 +32,7 @@
   `user-questions/request`、`agent/error` 等事件，按 `workspaceRegistry` 分组，7 种状态
   （running / waiting-approval / waiting-choice / waiting-input / completed / failed / idle），
   原子写入状态文件（契约见 [docs/DESIGN.md §4 / §4.1](docs/DESIGN.md)）。
-- **可上架市场**：`scripts/build-market-package.mjs` 产出单包 npm 发布物（Host + Client + 桥接载荷 +
+- **桥接扩展钩子**：注入到 DSH 主进程的桥接支持从 `%LOCALAPPDATA%\dsh-tray-follower\extensions\` 加载本地扩展（如 `dsh-topbar` 顶栏插件的 `dsh-topbar://action/*` 动作），扩展崩溃不影响 DSH，退出时自动反激活。\n- **可上架市场**：`scripts/build-market-package.mjs` 产出单包 npm 发布物（Host + Client + 桥接载荷 +
   安装脚本），`marketplace/` 提供市场索引条目、awesome-dsh-plugin 条目模板与发布清单。
 
 ## 仓库结构
@@ -55,7 +55,7 @@ docs/                         设计（DESIGN）、验证记录（VERIFICATION�
 ```powershell
 # 在 DSH 里通过插件管理器安装（本仓库的 packages 目录为本地链接安装）
 # 等价 CLI（在仓库根目录、且 dsh 在 PATH 时）：
-dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.0/dsh-tray-follower-0.2.0.tgz
+dsh plugin --profile desktop add https://github.com/Green233233/dsh_tray_follower/releases/download/v0.2.3/dsh-tray-follower-0.2.3.tgz
 ```
 
 安装后插件即开始写 `%LOCALAPPDATA%\dsh-tray-follower\state.json`；无桥接时**只发布状态、不发通知**。

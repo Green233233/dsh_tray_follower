@@ -64,7 +64,7 @@ const EXPECTED_LABELS = [
   '✓ 已完成的对话',
   '📁 Probe Workspace B  运行 0 · 待处理 0',
   '（无对话）',
-  'dsh-tray-follower v0.2.2'
+  'dsh-tray-follower v0.2.3'
 ]
 /** Contract-v2 defaults: idle rows and the idle submenu must be absent. */
 const FORBIDDEN_IDLE_PREFIXES = ['空闲会话', '○ ']

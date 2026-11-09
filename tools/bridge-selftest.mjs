@@ -44,6 +44,8 @@ const trayPatch = loadLib('tray-patch.cjs')
 const windowsModule = loadLib('windows.cjs')
 const heartbeatModule = loadLib('heartbeat.cjs')
 const bridgeModule = loadLib('bridge.cjs')
+const extensionHostModule = loadLib('extension-host.cjs')
+const hookModule = require(path.join(shellHookRoot, 'hook.cjs'))
 
 // --- tiny harness -----------------------------------------------------------
 
@@ -414,8 +416,8 @@ test('state: v2 without options warns and uses defaults; unsupported schema pars
   assert.ok(future.warnings.some((warning) => warning.includes('schemaVersion')))
 })
 
-test('constants: version 0.2.2 and contract schema v2', () => {
-  assert.equal(constants.VERSION, '0.2.2')
+test('constants: version 0.2.3 and contract schema v2', () => {
+  assert.equal(constants.VERSION, '0.2.3')
   assert.equal(constants.SCHEMA_VERSION, 2)
   assert.deepEqual([...constants.SUPPORTED_SCHEMA_VERSIONS], [1, 2])
 })
@@ -537,7 +539,7 @@ test('menu: all idle sessions are listed newest-first (no 10-row cap)', () => {
       workspaces: [{ id: 'w', title: 'W', sessions }]
     })
   )
-  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.3', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   assert.equal(workspace.label, '📁 W  运行 1 · 待处理 0')
   assert.equal(workspace.submenu.filter((item) => item.kind === 'session').length, 1, 'idle rows must not be inline')
@@ -564,7 +566,7 @@ test('menu: idle submenu truncates only past the hard cap (100)', () => {
     stats: { running: 0, pending: 0 },
     workspaces: [{ id: 'w', title: 'W', sessions }]
   }
-  const section = menuModel.buildStatusSection(rawState, { version: '0.2.2', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(rawState, { version: '0.2.3', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   const idleGroup = workspace.submenu.find((item) => item.kind === 'idle-group')
   assert.equal(idleGroup.label, '空闲会话 (105)')
@@ -656,7 +658,7 @@ test('menu: session nodes carry sessionId/workspaceId (active and idle)', () => 
       ]
     })
   )
-  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.3', locale: 'zh-CN' })
   const workspace = section.find((item) => item.kind === 'workspace')
   const active = workspace.submenu.find((item) => item.kind === 'session')
   assert.equal(active.sessionId, 'session-active-1')
@@ -669,7 +671,7 @@ test('menu: session nodes carry sessionId/workspaceId (active and idle)', () => 
 
 test('menu: session click calls openSession with the session id (focus fallback)', () => {
   const read = stateModule.normalizeState(sampleState())
-  const section = menuModel.buildStatusSection(read.state, { version: '0.2.2', locale: 'zh-CN' })
+  const section = menuModel.buildStatusSection(read.state, { version: '0.2.3', locale: 'zh-CN' })
   const opened = []
   let focused = 0
   const template = menuModel.toElectronTemplate(section, {
@@ -1091,7 +1093,7 @@ test('bridge: patch + adoption + menu rebuild from captured shell items', async 
     assert.ok(labels.includes('📁 dsh_tray_follower  运行 1 · 待处理 1'), `missing workspace row: ${labels.join(' | ')}`)
     assert.ok(labels.includes('▶ 配置 Git 等工程管理'))
     assert.ok(labels.includes('⏸ 等待批准'))
-    assert.ok(labels.includes('dsh-tray-follower v0.2.2'))
+    assert.ok(labels.includes('dsh-tray-follower v0.2.3'))
     assert.equal(bridge.diagnostics().capturedItemCount, 3, 'captured template must be the shell menu, not the merged menu')
 
     // The captured original click handler still works after the rebuild.
@@ -1444,6 +1446,193 @@ test('bridge: resolveDataDir honours DSH_TRAY_FOLLOWER_DIR', () => {
   assert.ok(resolved.endsWith('custom-dir'))
   const local = bridgeModule.resolveDataDir({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' })
   assert.ok(local.endsWith(path.join('AppData', 'Local', 'dsh-tray-follower')))
+})
+
+// --- extension host ----------------------------------------------------------
+
+test('extensions: loads file/directory extensions, contains errors, deactivates on before-quit', async () => {
+  await withTempDir((dir) => {
+    const extensionsDir = path.join(dir, 'extensions')
+    fs.mkdirSync(extensionsDir, { recursive: true })
+
+    const goodMarker = path.join(dir, 'good-activated.json')
+    const goodDeactivated = path.join(dir, 'good-deactivated.txt')
+    fs.writeFileSync(
+      path.join(extensionsDir, 'good.cjs'),
+      [
+        "'use strict'",
+        "const fs = require('node:fs')",
+        'module.exports = {',
+        '  activate(context) {',
+        `    fs.writeFileSync(${JSON.stringify(goodMarker)}, JSON.stringify({`,
+        '      hasApi: !!(context.api && context.api.app),',
+        '      hasApp: !!context.app,',
+        '      dataDir: context.dataDir,',
+        "      extensionLog: typeof context.log === 'function',",
+        "      now: typeof context.now() === 'number'",
+        '    }))',
+        "    context.log('info', 'good-activated', { marker: true })",
+        '  },',
+        '  deactivate() {',
+        `    fs.appendFileSync(${JSON.stringify(goodDeactivated)}, 'deactivated\\n')`,
+        '  }',
+        '}',
+        ''
+      ].join('\n'),
+      'utf8'
+    )
+
+    // Directory extension: manifest.json + declared main entry (the layout
+    // `dsh-topbar` installers use).
+    const directoryExtension = path.join(extensionsDir, 'directory-ext')
+    fs.mkdirSync(directoryExtension, { recursive: true })
+    fs.writeFileSync(
+      path.join(directoryExtension, 'manifest.json'),
+      JSON.stringify({ name: 'directory-ext', version: '0.0.1', main: 'hook.cjs' }),
+      'utf8'
+    )
+    fs.writeFileSync(
+      path.join(directoryExtension, 'hook.cjs'),
+      ["'use strict'", 'module.exports = {', "  activate(context) { context.log('info', 'directory-activated') }", '}', ''].join(
+        '\n'
+      ),
+      'utf8'
+    )
+
+    // Broken extension: throws while its module is required.
+    fs.writeFileSync(path.join(extensionsDir, 'broken.cjs'), "'use strict'\nthrow new Error('broken-extension-load')\n", 'utf8')
+
+    const logs = []
+    const fakeLogger = {
+      log: (message, data) => logs.push({ message, data }),
+      error: (message, data) => logs.push({ message, data }),
+      diag: () => {}
+    }
+    const listeners = new Map()
+    const fakeApp = {
+      on(event, handler) {
+        if (!listeners.has(event)) listeners.set(event, new Set())
+        listeners.get(event).add(handler)
+      },
+      removeListener(event, handler) {
+        const set = listeners.get(event)
+        if (set) set.delete(handler)
+      },
+      emit(event, ...args) {
+        for (const handler of [...(listeners.get(event) || [])]) handler(...args)
+      }
+    }
+    const api = { app: fakeApp }
+    const host = extensionHostModule.createExtensionHost({ api, app: fakeApp, dataDir: dir, logger: fakeLogger })
+
+    assert.doesNotThrow(() => host.loadAll())
+    const diagnostics = host.diagnostics()
+    assert.equal(diagnostics.started, true)
+    assert.equal(diagnostics.exists, true)
+    assert.deepEqual([...diagnostics.loaded].sort(), ['directory-ext', 'good'])
+    assert.equal(diagnostics.errorCount, 1, 'the broken extension must be contained as one extension-error')
+    assert.equal(diagnostics.errors[0].name, 'broken')
+    assert.ok(logs.some((entry) => entry.message === 'extension-loaded'))
+    assert.ok(logs.some((entry) => entry.message === 'extension-error' && entry.data.phase === 'load'))
+
+    const marker = JSON.parse(fs.readFileSync(goodMarker, 'utf8'))
+    assert.equal(marker.hasApi, true)
+    assert.equal(marker.hasApp, true)
+    assert.equal(marker.dataDir, dir)
+    assert.equal(marker.extensionLog, true)
+    assert.equal(marker.now, true)
+    assert.ok(logs.some((entry) => entry.message === 'extension:good:good-activated'))
+    assert.ok(logs.some((entry) => entry.message === 'extension:directory-ext:directory-activated'))
+
+    // A second loadAll must not activate extensions twice.
+    host.loadAll()
+    assert.equal(host.diagnostics().loaded.length, 2)
+
+    // before-quit calls deactivate() without throwing and is idempotent.
+    assert.doesNotThrow(() => fakeApp.emit('before-quit', {}))
+    assert.match(fs.readFileSync(goodDeactivated, 'utf8'), /deactivated/)
+    assert.equal(host.diagnostics().stopped, true)
+    host.stop('test')
+    assert.equal(fs.readFileSync(goodDeactivated, 'utf8').trim().split('\n').length, 1)
+    assert.equal(listeners.get('before-quit').size, 0)
+  })
+})
+
+test('extensions: missing extensions dir is a silent no-op; stop is idempotent', async () => {
+  await withTempDir((dir) => {
+    const host = extensionHostModule.createExtensionHost({
+      api: { app: { on() {}, removeListener() {} } },
+      dataDir: dir
+    })
+    assert.doesNotThrow(() => host.loadAll())
+    const diagnostics = host.diagnostics()
+    assert.equal(diagnostics.exists, false)
+    assert.deepEqual(diagnostics.loaded, [])
+    assert.equal(diagnostics.scanned, 0)
+    assert.equal(diagnostics.errorCount, 0)
+    assert.doesNotThrow(() => host.loadAll())
+    assert.doesNotThrow(() => host.stop('test'))
+    assert.doesNotThrow(() => host.stop('test'))
+    assert.equal(host.diagnostics().stopped, true)
+  })
+})
+
+test('hook: start wires the extension host into the bridge handle (diagnostics + stop)', async () => {
+  await withTempDir((dir) => {
+    writeStateFile(dir, sampleState())
+    const extensionsDir = path.join(dir, 'extensions')
+    fs.mkdirSync(extensionsDir, { recursive: true })
+    const activatedMarker = path.join(dir, 'probe-activated.json')
+    const deactivatedMarker = path.join(dir, 'probe-deactivated.txt')
+    fs.writeFileSync(
+      path.join(extensionsDir, 'probe.cjs'),
+      [
+        "'use strict'",
+        "const fs = require('node:fs')",
+        'module.exports = {',
+        '  activate(context) {',
+        `    fs.writeFileSync(${JSON.stringify(activatedMarker)}, JSON.stringify({ dataDir: context.dataDir }))`,
+        '  },',
+        '  deactivate() {',
+        `    fs.appendFileSync(${JSON.stringify(deactivatedMarker)}, 'deactivated\\n')`,
+        '  }',
+        '}',
+        ''
+      ].join('\n'),
+      'utf8'
+    )
+    const window = createFakeWindow({ url: 'dsh-app://app/', visible: false, focused: false })
+    const { electron } = createFakeElectron({ windows: [window], userDataDir: dir })
+    try {
+      delete globalThis.__DSHTF
+    } catch (_error) {
+      /* ignore */
+    }
+    const handle = hookModule.start({
+      api: electron,
+      env: {},
+      dataDir: dir,
+      hookDir: shellHookRoot,
+      timers: false
+    })
+    try {
+      const diagnostics = handle.diagnostics()
+      assert.equal(diagnostics.started, true)
+      assert.ok(diagnostics.extensions, 'bridge diagnostics must expose the extension host')
+      assert.deepEqual(diagnostics.extensions.loaded, ['probe'])
+      assert.equal(diagnostics.extensions.errorCount, 0)
+      assert.equal(JSON.parse(fs.readFileSync(activatedMarker, 'utf8')).dataDir, path.resolve(dir))
+      assert.equal(globalThis.__DSHTF, handle)
+    } finally {
+      handle.stop('selftest')
+      try {
+        delete globalThis.__DSHTF
+      } catch (_error) {
+        /* ignore */
+      }
+    }
+    assert.match(fs.readFileSync(deactivatedMarker, 'utf8'), /deactivated/)
+  })
 })
 
 // --- injector pure helpers ---------------------------------------------------

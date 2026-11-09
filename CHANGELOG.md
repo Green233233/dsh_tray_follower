@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-09
+
+### Added
+
+- **Extension-hook host in the injected shell bridge**: the bridge now loads
+  local CommonJS extensions from `<dataDir>/extensions/*.cjs` (or a directory
+  with `manifest.json`) after startup, calling
+  `activate({ api, app, dataDir, log, now })` and `deactivate()` before quit.
+  Failures are contained as `extension-error` and never crash DSH.
+- **dsh-topbar integration**: the new top-bar plugin's Electron hook
+  (`dsh-topbar://action/*`: quit / restart / reload / check-updates /
+  toggle-devtools + native menu patch) is loaded through this extension host.
+
+### Changed
+
+- Bridge and plugin versions are 0.2.3.
+- Bridge self-test now covers extension loading, containment and deactivation
+  (75/75).
 ## [0.2.2] - 2026-11-08
 
 ### Added

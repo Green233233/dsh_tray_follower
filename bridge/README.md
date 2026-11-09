@@ -1,4 +1,4 @@
-# dsh-tray-follower — DSH Desktop shell bridge (v0.2.2)
+# dsh-tray-follower — DSH Desktop shell bridge (v0.2.3)
 
 This is the **optional native desktop half** of `dsh-tray-follower`. It runs inside
 the DSH Desktop Electron **main process**, extends the Windows system-tray menu
@@ -46,6 +46,7 @@ halves never talk over IPC.
 | `bridge.log` | bridge log, rotated at 1 MiB (`bridge.log.1`) |
 | `cursor.json` | notification dedupe cursor (seen event ids + last notify time) |
 | `injector.log` | launcher/injector log (rotated at 512 KiB) |
+| `extensions\` | user-owned Electron-main extension hooks (see §3 “Extension hooks”; not created by the installer) |
 
 The installer rewrites the **DeepSeek Harness shortcuts** (Start Menu, Desktop,
 Public Desktop, pinned taskbar — only shortcuts whose target is
@@ -230,6 +231,72 @@ DSH). PowerShell in `bridge/injector/` is used only for process enumeration and
   (>15 s) to fall back to its own PowerShell WinRT toasts when the bridge is not
   running.
 
+### Extension hooks (other local Electron-main helpers)
+
+The injected bridge is also a small **extension host**: after it starts it loads
+user-owned CommonJS hooks from the bridge data directory so companion projects —
+e.g. [`dsh-topbar`](https://github.com/Green233233/dsh_topbar) — can add
+main-process behaviour without duplicating the `--inspect` injector/launcher.
+
+Scanned location (`dataDir` is `%LOCALAPPDATA%\dsh-tray-follower`, override with
+`DSH_TRAY_FOLLOWER_DIR`):
+
+```
+%LOCALAPPDATA%\dsh-tray-follower\extensions\
+  my-helper.cjs                 # loose CommonJS file (extension name = file name)
+  dsh-topbar\                   # directory extension (installed by its own installer)
+    manifest.json               # { "name": "dsh-topbar", "main": "hook.cjs" }
+    hook.cjs
+```
+
+Contract (extension API version **1**):
+
+```js
+// module.exports.activate(context) is required; deactivate() is optional.
+module.exports = {
+  /**
+   * @param {object} context
+   * @param {object} context.api      Electron module (`require('electron')`, main process)
+   * @param {object} context.app      context.api.app
+   * @param {string} context.dataDir  %LOCALAPPDATA%\dsh-tray-follower
+   * @param {(level: string, event: string, data?: object) => void} context.log
+   *                                  writes `extension:<name>:<event>` to bridge.log, never throws
+   * @param {() => number} context.now  clock used by the host
+   */
+  activate(context) {
+    context.log('info', 'my-helper-activated', { pid: process.pid })
+  },
+  /** Called on app `before-quit` and on bridge stop, in reverse load order. */
+  deactivate() {}
+}
+```
+
+Directory manifests are optional in the sense that only a directory **with**
+`manifest.json` is treated as an extension; `manifest.main` defaults to
+`hook.cjs`, `manifest.name` defaults to the directory name, and `manifest.version`
+is reported in diagnostics. Loose `<name>.cjs` files at the top level are loaded
+directly. Entries are capped at 32 per start, names are deduplicated, and a
+manifest `main` that escapes the extension directory is rejected.
+
+Containment and lifecycle (all verified by `node tools/bridge-selftest.mjs`):
+
+- `activate()` runs inside try/catch; a missing/throwing/rejected activation is
+  recorded as an `extension-error` entry in `bridge.log` and never blocks the
+  tray bridge or other extensions.
+- `deactivate()` runs in reverse load order on `app` `before-quit` (before the
+  bridge's own `will-quit` stop) and on `bridge.stop()`; errors are contained.
+- `globalThis.__DSHTF.diagnostics()` (and the injector's diagnostics expression)
+  now carries `extensions: { loaded: [names], errorCount, errors, scanned, ... }`.
+- Extension `context.log(level, event, data)` lines appear in `bridge.log` as
+  `extension:<name>:<event>` and in test-mode diagnostics as `extension-log`.
+
+Trust model: an extension is arbitrary Node/Electron-main code running with the
+user's full privileges inside DeepSeek Harness. The bridge only loads files that
+already exist below `<dataDir>\extensions\` — it never downloads, auto-updates
+or verifies signatures of extension code. Install only extensions you trust, and
+prefer installing/removing them while DSH is fully quit (extensions are loaded
+once at DSH startup).
+
 ### Failure containment
 
 Everything is try/caught and logged; broken/missing/partial state files render a
@@ -258,7 +325,7 @@ crash DSH; the plugin half still works without the bridge (fallback toasts).
 node tools/bridge-selftest.mjs
 ```
 
-72 tests cover state parsing/normalization (contract v1 **and** v2 options with
+75 tests cover state parsing/normalization (contract v1 **and** v2 options with
 clamping/fallbacks), menu model (priority order, idle hidden by default /
 optional idle submenu, settings-driven row limit, header counts / footer toggles,
 overflow, zh/en labels, placeholders), notification policy (dedupe, baseline,
@@ -266,8 +333,10 @@ kind filters, `suppressWhenFocused`, `notificationSound`→`silent`, coalescing,
 rate limit, stale-event replay guard), cursor persistence, tray patch
 capture/adoption/no-recursion, window focus helpers, heartbeat contract, log
 rotation, the full bridge core with a fake `electron` API (including v2 settings
-end-to-end), and the injector pure helpers (env sanitization, bootstrap escaping,
-DSH process detection, shortcut classification).
+end-to-end), the **extension host** (loose-file and manifest-directory fixtures,
+`activate(context)` contract, broken-extension containment, `deactivate()` on
+`before-quit`/stop), and the injector pure helpers (env sanitization, bootstrap
+escaping, DSH process detection, shortcut classification).
 
 ### Isolated end-to-end probe (launches a *second* DSH instance)
 

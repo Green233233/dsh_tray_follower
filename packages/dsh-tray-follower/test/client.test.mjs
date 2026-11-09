@@ -787,8 +787,8 @@ test('window session event opens the session through uiWorkspace', () => {
   assert.deepEqual(ctx.openedSessions, ['session-abc'])
 })
 
-test('manifest and locale resources carry the v0.2.2 rename and dependencies', () => {
-  assert.equal(MANIFEST.version, '0.2.2')
+test('manifest and locale resources carry the v0.2.3 rename and dependencies', () => {
+  assert.equal(MANIFEST.version, '0.2.3')
   assert.equal(MANIFEST.exports['./client'], './client.js')
   assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-workspace'))
   assert.ok(MANIFEST.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout'))

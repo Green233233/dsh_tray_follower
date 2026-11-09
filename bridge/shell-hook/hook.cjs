@@ -24,7 +24,7 @@
 
 const path = require('node:path')
 
-const VERSION = '0.2.2'
+const VERSION = '0.2.3'
 
 let cachedElectron = undefined
 
@@ -75,6 +75,113 @@ function failedHandle(error) {
   return handle
 }
 
+/** Best-effort log sink for the extension host (bridge logger when available). */
+function extensionLogSink(bridge) {
+  try {
+    const internal = bridge && bridge.__internal
+    if (internal && internal.logger && typeof internal.logger.log === 'function') return internal.logger
+  } catch (_error) {
+    /* ignore */
+  }
+  return {
+    log() {},
+    error() {},
+    diag() {}
+  }
+}
+
+/**
+ * Load user extensions from `<dataDir>/extensions/` through the bridge logger and
+ * enrich the public bridge handle:
+ *
+ *   - `diagnostics()` gains an `extensions` field (loaded names + error count);
+ *   - `stop()` deactivates extensions before stopping the tray bridge.
+ *
+ * Extensions must never be able to break the tray bridge, so every step is
+ * guarded and a failure degrades to "no extensions" instead of throwing.
+ *
+ * @param {object} bridge bridge handle returned by `lib/bridge.cjs`
+ * @param {object} api Electron module
+ * @param {{hookDir: string, now?: () => number}} options
+ * @returns {object|null} extension host handle (null when unavailable)
+ */
+function attachExtensionHost(bridge, api, options = {}) {
+  try {
+    if (!bridge || typeof bridge !== 'object' || bridge.started === false) return null
+    // The bridge handle exposes `logPath` but not `dataDir`; prefer the
+    // explicitly resolved directory passed by `start()` and fall back to the
+    // log file's directory (same data dir by construction).
+    const explicitDataDir = typeof options.dataDir === 'string' && options.dataDir ? options.dataDir : ''
+    const handleDataDir = typeof bridge.dataDir === 'string' && bridge.dataDir ? bridge.dataDir : ''
+    const logPath = typeof bridge.logPath === 'string' && bridge.logPath ? bridge.logPath : ''
+    const dataDir = explicitDataDir || handleDataDir || (logPath ? path.dirname(logPath) : '')
+    if (!dataDir) return null
+    const hookDir = typeof options.hookDir === 'string' && options.hookDir ? options.hookDir : __dirname
+    const hostModule = require(path.join(hookDir, 'lib', 'extension-host.cjs'))
+    if (!hostModule || typeof hostModule.createExtensionHost !== 'function') return null
+
+    const host = hostModule.createExtensionHost({
+      api,
+      app: api && api.app,
+      dataDir,
+      logger: extensionLogSink(bridge),
+      now: typeof options.now === 'function' ? options.now : undefined
+    })
+    host.loadAll()
+
+    try {
+      const originalDiagnostics = bridge.diagnostics
+      if (typeof originalDiagnostics === 'function') {
+        bridge.diagnostics = function diagnosticsWithExtensions() {
+          let result
+          try {
+            result = originalDiagnostics.call(bridge)
+          } catch (error) {
+            result = { ok: false, error: String((error && error.message) || error) }
+          }
+          if (result && typeof result === 'object') {
+            try {
+              result.extensions = host.diagnostics()
+            } catch (_error) {
+              result.extensions = { ok: false, error: 'extension diagnostics unavailable' }
+            }
+          }
+          return result
+        }
+      }
+    } catch (_error) {
+      /* diagnostics enrichment is optional */
+    }
+
+    try {
+      const originalStop = bridge.stop
+      if (typeof originalStop === 'function') {
+        bridge.stop = function stopWithExtensions(reason) {
+          try {
+            host.stop(typeof reason === 'string' && reason ? reason : 'stop')
+          } catch (_error) {
+            /* extension deactivation must never block bridge shutdown */
+          }
+          return originalStop.call(bridge, reason)
+        }
+      }
+    } catch (_error) {
+      /* lifecycle wrapping is optional */
+    }
+
+    return host
+  } catch (error) {
+    try {
+      extensionLogSink(bridge).log('extension-host-error', {
+        error: error instanceof Error ? error.message : String(error)
+      })
+    } catch (_error) {
+      /* ignore */
+    }
+    return null
+  }
+}
+
 /**
  * Start the bridge inside the Electron main process.
  *
@@ -122,6 +229,13 @@ function start(options = {}) {
       logger: options.logger
     })
     bridge.start()
+    try {
+      const extensionDataDir =
+        typeof dataDir === 'string' && dataDir ? path.resolve(dataDir) : bridgeModule.resolveDataDir(env)
+      attachExtensionHost(bridge, api, { hookDir, dataDir: extensionDataDir, now: options.now })
+    } catch (_error) {
+      /* extensions are optional; never fail the tray bridge */
+    }
     try {
       globalThis.__DSHTF = bridge
     } catch (_error) {

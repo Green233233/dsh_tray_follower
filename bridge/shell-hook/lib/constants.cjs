@@ -9,7 +9,7 @@
  * raises native Electron notifications.
  */
 
-const VERSION = '0.2.2'
+const VERSION = '0.2.3'
 
 /** State contract version owned by the plugin half (docs/DESIGN.md §4). */
 const SCHEMA_VERSION = 2
